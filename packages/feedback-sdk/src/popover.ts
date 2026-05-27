@@ -1,4 +1,4 @@
-import type { Feedback, FeedbackAuthor, FeedbackStatus } from "@mahmulp/shared-types";
+import type { Feedback, FeedbackAuthor, FeedbackStatus } from "./types.js";
 
 /**
  * Popover renderer for the composer (new pin) and thread (existing pin) UIs.

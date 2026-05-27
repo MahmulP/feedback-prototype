@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Feedback } from "@mahmulp/shared-types";
+import type { Feedback } from "./types.js";
 import { PopoverManager } from "./popover.js";
 
 let layer: HTMLDivElement;

@@ -50,3 +50,6 @@ apps/api/data/
 # svelte-kit build output
 .svelte-kit/
 
+
+# kiro local workspace
+.kiro/

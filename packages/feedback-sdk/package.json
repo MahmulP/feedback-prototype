@@ -1,7 +1,21 @@
 {
   "name": "@mahmulp/feedback-sdk",
   "version": "0.1.0",
-  "description": "Framework-agnostic visual feedback SDK for prototypes. Svelte primary, works in React, Vue, and plain HTML.",
+  "description": "Framework-agnostic visual feedback SDK for prototypes. Pin comments to UI elements, with stable DOM selectors plus screenshot capture. Svelte primary; works in React, Vue, and plain HTML.",
+  "license": "MIT",
+  "author": {
+    "name": "Mahmul Pratama",
+    "url": "https://github.com/MahmulP"
+  },
+  "homepage": "https://github.com/MahmulP/feedback-prototype/tree/main/packages/feedback-sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MahmulP/feedback-prototype.git",
+    "directory": "packages/feedback-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/MahmulP/feedback-prototype/issues"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -26,17 +40,16 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run",
-    "lint": "echo 'no lint configured for feedback-sdk yet'"
-  },
-  "dependencies": {
-    "@mahmulp/shared-types": "workspace:*"
+    "lint": "echo 'no lint configured for feedback-sdk yet'",
+    "prepublishOnly": "bun run typecheck && bun run test && bun run build"
   },
   "peerDependencies": {
     "svelte": "^4.0.0 || ^5.0.0",
@@ -62,8 +75,15 @@
   "keywords": [
     "feedback",
     "annotation",
+    "comments",
     "prototype",
+    "design-review",
+    "qa",
     "svelte",
-    "self-hosted"
-  ]
+    "self-hosted",
+    "screenshot"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

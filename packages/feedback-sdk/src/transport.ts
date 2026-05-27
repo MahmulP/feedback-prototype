@@ -6,7 +6,7 @@ import type {
   FeedbackStatus,
   FeedbackTransport,
   ListFeedbackResult,
-} from "@mahmulp/shared-types";
+} from "./types.js";
 
 export type { FeedbackTransport };
 

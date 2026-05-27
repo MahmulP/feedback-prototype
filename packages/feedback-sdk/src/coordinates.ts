@@ -1,4 +1,4 @@
-import type { FeedbackCoordinates, ViewportInfo } from "@mahmulp/shared-types";
+import type { FeedbackCoordinates, ViewportInfo } from "./types.js";
 
 /**
  * Compute pin coordinates for a click on a target element.

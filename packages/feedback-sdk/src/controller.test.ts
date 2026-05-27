@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Feedback, FeedbackTransport } from "@mahmulp/shared-types";
+import type { Feedback, FeedbackTransport } from "./types.js";
 import { initFeedback } from "./controller.js";
 import { createMockTransport } from "./mock.js";
 

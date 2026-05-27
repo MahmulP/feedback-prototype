@@ -63,4 +63,4 @@ export type {
   ListFeedbackQuery,
   ListFeedbackResult,
   ViewportInfo,
-} from "@mahmulp/shared-types";
+} from "./types.js";

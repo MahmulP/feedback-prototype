@@ -4,7 +4,7 @@ import type {
   FeedbackAuthor,
   FeedbackStatus,
   FeedbackTransport,
-} from "@mahmulp/shared-types";
+} from "./types.js";
 import { computeCoordinates, getViewportInfo } from "./coordinates.js";
 import { loadAuthor, saveAuthor } from "./identity.js";
 import { Overlay } from "./overlay.js";
