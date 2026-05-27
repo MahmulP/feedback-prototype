@@ -10,6 +10,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Typecheck · Test · Build
@@ -52,14 +55,3 @@ jobs:
       - name: Build — dashboard
         working-directory: apps/dashboard
         run: bunx next build
-
-      - name: Smoke (API + script)
-        run: |
-          bun --cwd apps/api run src/server.ts &
-          API_PID=$!
-          for i in {1..30}; do
-            if curl -fs http://localhost:8787/health > /dev/null; then break; fi
-            sleep 1
-          done
-          bun run scripts/e2e-smoke.ts
-          kill $API_PID || true

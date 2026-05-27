@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+# Don't race with another release run.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Tag · Bump · Publish
+    runs-on: ubuntu-latest
+    # Skip if the push that landed on main was itself the release commit.
+    if: "!contains(github.event.head_commit.message, 'chore(release):')"
+    permissions:
+      contents: write   # push tag + version bump commit
+      id-token: write   # npm provenance
+    steps:
+      - name: Checkout (full history for tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Use the default token; commits from this job won't retrigger
+          # other workflows because GITHUB_TOKEN-authored pushes don't fire
+          # `push` events. The `if:` guard above is belt-and-suspenders.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node (for npm publish)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      # ----- 1. Compute next version from conventional commits -----
+      - name: Compute next version & create tag
+        id: tag
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Conventional commits when present (feat:, fix:, BREAKING CHANGE);
+          # default to patch so every merge to main produces a tag.
+          default_bump: patch
+          tag_prefix: v
+          release_branches: main
+
+      - name: Stop early if no new tag
+        if: steps.tag.outputs.new_tag == ''
+        run: echo "No new tag was produced; nothing to release."
+
+      # ----- 2. Bump every package.json to match the new tag -----
+      - name: Bump workspace package versions
+        if: steps.tag.outputs.new_tag != ''
+        env:
+          NEW_VERSION: ${{ steps.tag.outputs.new_version }}
+        run: bun run scripts/bump-versions.ts "$NEW_VERSION"
+
+      - name: Commit version bump back to main
+        if: steps.tag.outputs.new_tag != ''
+        env:
+          NEW_TAG: ${{ steps.tag.outputs.new_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "no package.json changes to commit"
+            exit 0
+          fi
+          git add -A
+          git commit -m "chore(release): ${NEW_TAG} [skip ci]"
+          # Re-point the tag at the version-bump commit so the published
+          # tag reflects the actual version on disk.
+          git tag -f "${NEW_TAG}"
+          git push origin HEAD:main
+          git push origin "${NEW_TAG}" --force
+
+      # ----- 3. Build the SDK against the bumped version -----
+      - name: Build feedback-sdk
+        if: steps.tag.outputs.new_tag != ''
+        working-directory: packages/feedback-sdk
+        run: |
+          bunx tsc --noEmit
+          bunx vitest --run
+          bunx tsup
+
+      # ----- 4. Publish to npm (no-op when token is absent) -----
+      - name: Publish @mahmulp/feedback-sdk to npm
+        if: steps.tag.outputs.new_tag != '' && env.NPM_TOKEN != ''
+        working-directory: packages/feedback-sdk
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      # ----- 5. Publish the GitHub Release -----
+      - name: Publish GitHub Release
+        if: steps.tag.outputs.new_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.new_tag }}
+          name: ${{ steps.tag.outputs.new_tag }}
+          body: ${{ steps.tag.outputs.changelog }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
