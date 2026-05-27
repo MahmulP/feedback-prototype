@@ -1,26 +1,34 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
-  assertProjectAllowed,
+  assertProjectMatches,
   authMiddleware,
-  buildAuthOptions,
-  requireAdminKey,
-  requireSdkKey,
+  type AppVariables,
+  currentUser,
+  generateApiKey,
+  requireProjectKey,
+  requireUser,
 } from "./auth.js";
 import type { ApiEnv } from "./env.js";
 import { createLogger, loggingMiddleware, type Logger } from "./logger.js";
+import { hashPassword, verifyPassword } from "./password.js";
 import { rateLimit } from "./rate-limit.js";
-import { detectImageMime, LocalDiskDriver, type StorageDriver } from "./storage.js";
-import { createInMemoryStore, type FeedbackStore } from "./store.js";
 import {
   commentInputSchema,
   coordinatesUpdateSchema,
   createFeedbackSchema,
   listQuerySchema,
+  loginSchema,
+  projectCreateSchema,
+  projectUpdateSchema,
+  signupSchema,
   statusUpdateSchema,
 } from "./schemas.js";
+import { sessionClearHeader, sessionCookieHeader, signSession } from "./session.js";
+import { detectImageMime, LocalDiskDriver, type StorageDriver } from "./storage.js";
+import { createInMemoryStore, type FeedbackStore } from "./store.js";
 
-const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 
 export interface AppDeps {
   env: ApiEnv;
@@ -29,216 +37,317 @@ export interface AppDeps {
   logger?: Logger;
 }
 
-/**
- * Build the Hono app. Dependencies are injected so tests can swap
- * the store and storage driver for in-memory equivalents.
- */
-export function createApp(deps: AppDeps): Hono {
-  const app = new Hono();
+export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
+  const app = new Hono<{ Variables: AppVariables }>();
   const logger = deps.logger ?? createLogger(deps.env);
-  const authOptions = buildAuthOptions(deps.env);
 
-  // Logging first, so even rejected requests leave a trace.
   app.use("/*", loggingMiddleware(logger));
 
-  // CORS — explicit list when configured, allow-all in dev only.
-  const allowedOrigins = deps.env.ALLOWED_ORIGINS;
   app.use(
     "/*",
     cors({
       origin: (origin) => {
-        if (allowedOrigins.includes("*")) return origin ?? "*";
-        if (origin && allowedOrigins.includes(origin)) return origin;
+        if (deps.env.ALLOWED_ORIGINS.includes("*")) return origin ?? "*";
+        if (origin && deps.env.ALLOWED_ORIGINS.includes(origin)) return origin;
         return null;
       },
-      allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-      allowHeaders: ["content-type", "x-feedback-key", "x-dashboard-key", "authorization"],
-      credentials: false,
+      allowMethods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+      allowHeaders: ["content-type", "x-feedback-key", "authorization"],
+      credentials: true,
     })
   );
 
-  app.use("/v1/*", authMiddleware(authOptions));
+  app.use("/*", authMiddleware({ env: deps.env, store: deps.store }));
 
-  // Per-key rate limiting on ingest. Identifies callers by the x-feedback-key
-  // header so a misbehaving SDK can't drown out legitimate ones.
   const ingestRateLimit = rateLimit({
     capacity: deps.env.RATE_LIMIT_INGEST_PER_MIN,
     windowMs: 60_000,
     keyFn: (c) => {
-      const key = c.req.header("x-feedback-key") ?? c.req.header("x-dashboard-key");
-      if (!key) {
-        return c.req.header("x-forwarded-for") ?? "anon";
-      }
-      return `key:${key}`;
+      const k = c.req.header("x-feedback-key");
+      if (k) return `key:${k}`;
+      return c.req.header("x-forwarded-for") ?? "anon";
     },
   });
 
-  // Health
+  // -------------------- Health --------------------
   app.get("/health", (c) => c.json({ ok: true }));
 
-  // ---- Dashboard reads ----
-  app.get("/v1/projects", requireAdminKey, async (c) => {
-    const items = await deps.store.listProjects();
+  // -------------------- Auth ----------------------
+  app.post("/v1/auth/signup", async (c) => {
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
+    const parsed = signupSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    let user;
+    try {
+      const passwordHash = await hashPassword(parsed.data.password);
+      user = await deps.store.createUser({
+        email: parsed.data.email,
+        name: parsed.data.name,
+        passwordHash,
+      });
+    } catch (err) {
+      if ((err as Error).message === "user_exists") {
+        return c.json({ error: { code: "user_exists", message: "email already registered" } }, 409);
+      }
+      throw err;
+    }
+    const token = signSession(deps.env, user.id);
+    c.header("set-cookie", sessionCookieHeader(deps.env, token));
+    return c.json({ user }, 201);
+  });
+
+  app.post("/v1/auth/login", async (c) => {
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
+    const parsed = loginSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const record = await deps.store.getUserByEmail(parsed.data.email);
+    if (!record) return c.json({ error: { code: "invalid_credentials", message: "wrong email or password" } }, 401);
+    const ok = await verifyPassword(parsed.data.password, record.passwordHash);
+    if (!ok) return c.json({ error: { code: "invalid_credentials", message: "wrong email or password" } }, 401);
+    const token = signSession(deps.env, record.user.id);
+    c.header("set-cookie", sessionCookieHeader(deps.env, token));
+    return c.json({ user: record.user });
+  });
+
+  app.post("/v1/auth/logout", async (c) => {
+    c.header("set-cookie", sessionClearHeader(deps.env));
+    return c.json({ ok: true });
+  });
+
+  app.get("/v1/auth/me", requireUser, async (c) => {
+    return c.json({ user: currentUser(c) });
+  });
+
+  // -------------------- Projects (dashboard) --------------------
+  app.get("/v1/projects", requireUser, async (c) => {
+    const items = await deps.store.listProjectsForOwner(currentUser(c).id);
     return c.json({ items });
   });
 
-  app.get("/v1/feedback", requireAdminKey, async (c) => {
+  app.post("/v1/projects", requireUser, async (c) => {
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
+    const parsed = projectCreateSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    try {
+      const project = await deps.store.createProject(currentUser(c).id, parsed.data);
+      return c.json(project, 201);
+    } catch (err) {
+      if ((err as Error).message === "project_exists") {
+        return c.json(
+          { error: { code: "project_exists", message: "slug already in use" } },
+          409
+        );
+      }
+      throw err;
+    }
+  });
+
+  app.get("/v1/projects/:slug", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const project = await deps.store.getProject(slug);
+    if (!project || project.ownerId !== currentUser(c).id) {
+      return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    }
+    return c.json(project);
+  });
+
+  app.patch("/v1/projects/:slug", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
+    const parsed = projectUpdateSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const updated = await deps.store.updateProject(slug, currentUser(c).id, parsed.data);
+    if (!updated) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    return c.json(updated);
+  });
+
+  app.delete("/v1/projects/:slug", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const ok = await deps.store.deleteProject(slug, currentUser(c).id);
+    if (!ok) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    return c.json({ ok: true });
+  });
+
+  // -------------------- Project API keys ------------------------
+  app.get("/v1/projects/:slug/keys", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const project = await deps.store.getProject(slug);
+    if (!project || project.ownerId !== currentUser(c).id) {
+      return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    }
+    const items = await deps.store.listProjectApiKeys(project.id);
+    return c.json({ items });
+  });
+
+  app.post("/v1/projects/:slug/keys", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const project = await deps.store.getProject(slug);
+    if (!project || project.ownerId !== currentUser(c).id) {
+      return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    }
+    const issued = generateApiKey();
+    const meta = await deps.store.createProjectApiKey(project.id, {
+      keyHash: issued.hash,
+      prefix: issued.prefix,
+    });
+    // The plaintext key is returned **once**, then the API only stores the hash.
+    return c.json({ ...meta, key: issued.key }, 201);
+  });
+
+  app.delete("/v1/projects/:slug/keys/:keyId", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const keyId = c.req.param("keyId");
+    const project = await deps.store.getProject(slug);
+    if (!project || project.ownerId !== currentUser(c).id) {
+      return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    }
+    const ok = await deps.store.deleteProjectApiKey(keyId, project.id);
+    if (!ok) return c.json({ error: { code: "key_not_found", message: "no such key" } }, 404);
+    return c.json({ ok: true });
+  });
+
+  // -------------------- Feedback (dashboard reads, owner-scoped) --------------------
+  app.get("/v1/projects/:slug/feedback", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const project = await deps.store.getProject(slug);
+    if (!project || project.ownerId !== currentUser(c).id) {
+      return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    }
     const parsed = listQuerySchema.safeParse({
-      projectId: c.req.query("projectId"),
       pageUrl: c.req.query("pageUrl") ?? undefined,
       status: c.req.query("status") ?? undefined,
     });
-    if (!parsed.success) {
-      return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
-    }
-    const items = await deps.store.list(parsed.data);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const items = await deps.store.list({ projectId: project.slug, ...parsed.data });
     return c.json({ items });
   });
 
-  app.get("/v1/feedback/:id", requireAdminKey, async (c) => {
+  app.get("/v1/feedback/:id", requireUser, async (c) => {
     const id = c.req.param("id");
     const fb = await deps.store.get(id);
-    if (!fb) {
+    if (!fb) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    const project = await deps.store.getProject(fb.projectId);
+    if (!project || project.ownerId !== currentUser(c).id) {
       return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
     }
     return c.json(fb);
   });
 
-  // ---- SDK ingest ----
-  app.post("/v1/feedback", requireSdkKey, ingestRateLimit, async (c) => {
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: { code: "validation", message: "invalid JSON body" } }, 400);
+  app.patch("/v1/feedback/:id", requireUser, async (c) => {
+    const id = c.req.param("id");
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
+    const parsed = statusUpdateSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const fb = await deps.store.get(id);
+    if (!fb) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    const project = await deps.store.getProject(fb.projectId);
+    if (!project || project.ownerId !== currentUser(c).id) {
+      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
     }
+    const updated = await deps.store.setStatus(id, parsed.data.status);
+    if (!updated) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    return c.json(updated);
+  });
+
+  app.post("/v1/feedback/:id/comments", async (c) => {
+    // Both dashboard users (replies) and SDK keys (rare) can append comments.
+    const id = c.req.param("id");
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
+    const parsed = commentInputSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const fb = await deps.store.get(id);
+    if (!fb) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    const project = await deps.store.getProject(fb.projectId);
+    if (!project) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+
+    const bag = c.var.auth;
+    const isOwner = bag?.user?.id === project.ownerId;
+    const isProjectKey = bag?.scopedProjectId === project.slug;
+    if (!isOwner && !isProjectKey) return c.json({ error: { code: "unauthorized", message: "login or project key required" } }, 401);
+
+    const updated = await deps.store.reply(id, parsed.data);
+    if (!updated) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    return c.json(updated);
+  });
+
+  // -------------------- SDK ingest (project-key scoped) --------------------
+  app.post("/v1/feedback", requireProjectKey, ingestRateLimit, async (c) => {
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
     const parsed = createFeedbackSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
-    }
-    const blocked = assertProjectAllowed(c, parsed.data.projectId);
-    if (blocked) return blocked;
-    const created = await deps.store.create(parsed.data);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const bag = c.var.auth;
+    const created = await deps.store.create({
+      projectId: bag.scopedProjectId!,
+      ...parsed.data,
+    });
     return c.json(created, 201);
   });
 
-  app.post("/v1/feedback/:id/comments", requireSdkKey, ingestRateLimit, async (c) => {
-    const id = c.req.param("id");
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: { code: "validation", message: "invalid JSON body" } }, 400);
-    }
-    const parsed = commentInputSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
-    }
-    const existing = await deps.store.get(id);
-    if (!existing) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    }
-    const blocked = assertProjectAllowed(c, existing.projectId);
-    if (blocked) return blocked;
-    const updated = await deps.store.reply(id, parsed.data);
-    if (!updated) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    }
-    return c.json(updated);
+  // SDK list — scoped by the project key. Lets the SDK render existing pins.
+  app.get("/v1/feedback", requireProjectKey, async (c) => {
+    const bag = c.var.auth;
+    const parsed = listQuerySchema.safeParse({
+      pageUrl: c.req.query("pageUrl") ?? undefined,
+      status: c.req.query("status") ?? undefined,
+    });
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const items = await deps.store.list({ projectId: bag.scopedProjectId!, ...parsed.data });
+    return c.json({ items });
   });
 
-  // ---- Status (admin only — the dashboard manages this) ----
-  app.patch("/v1/feedback/:id", requireAdminKey, async (c) => {
+  app.patch("/v1/feedback/:id/coordinates", requireProjectKey, ingestRateLimit, async (c) => {
     const id = c.req.param("id");
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: { code: "validation", message: "invalid JSON body" } }, 400);
-    }
-    const parsed = statusUpdateSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
-    }
-    const updated = await deps.store.setStatus(id, parsed.data.status);
-    if (!updated) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    }
-    return c.json(updated);
-  });
-
-  // ---- Move pin (SDK ingest — repositioning a pin via drag) ----
-  app.patch("/v1/feedback/:id/coordinates", requireSdkKey, ingestRateLimit, async (c) => {
-    const id = c.req.param("id");
-    const existing = await deps.store.get(id);
-    if (!existing) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    }
-    const blocked = assertProjectAllowed(c, existing.projectId);
+    const fb = await deps.store.get(id);
+    if (!fb) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    const blocked = assertProjectMatches(c, fb.projectId);
     if (blocked) return blocked;
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: { code: "validation", message: "invalid JSON body" } }, 400);
-    }
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
     const parsed = coordinatesUpdateSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: { code: "validation", message: parsed.error.message } }, 400);
-    }
+    if (!parsed.success) return validation(c, parsed.error.message);
     const updated = await deps.store.setCoordinates(id, parsed.data.coordinates);
-    if (!updated) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    }
+    if (!updated) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
     return c.json(updated);
   });
 
-  // ---- Screenshot upload ----
-  app.post("/v1/feedback/:id/screenshot", requireSdkKey, ingestRateLimit, async (c) => {
+  app.post("/v1/feedback/:id/screenshot", requireProjectKey, ingestRateLimit, async (c) => {
     const id = c.req.param("id");
-    const existing = await deps.store.get(id);
-    if (!existing) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    }
-    const blocked = assertProjectAllowed(c, existing.projectId);
+    const fb = await deps.store.get(id);
+    if (!fb) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    const blocked = assertProjectMatches(c, fb.projectId);
     if (blocked) return blocked;
 
     let form: FormData;
     try {
       form = await c.req.formData();
     } catch {
-      return c.json({ error: { code: "validation", message: "expected multipart form-data" } }, 400);
+      return validation(c, "expected multipart form-data");
     }
     const file = form.get("file");
-    if (!(file instanceof File)) {
-      return c.json({ error: { code: "validation", message: "field 'file' is required" } }, 400);
-    }
+    if (!(file instanceof File)) return validation(c, "field 'file' is required");
     if (file.size > MAX_SCREENSHOT_BYTES) {
-      return c.json(
-        { error: { code: "payload_too_large", message: "screenshot exceeds 5 MB" } },
-        413
-      );
+      return c.json({ error: { code: "payload_too_large", message: "screenshot exceeds 5 MB" } }, 413);
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
     const mime = detectImageMime(bytes);
-    if (!mime) {
-      return c.json(
-        { error: { code: "validation", message: "screenshot must be PNG, JPEG, or WebP" } },
-        400
-      );
-    }
+    if (!mime) return validation(c, "screenshot must be PNG, JPEG, or WebP");
 
     const ext = mime === "image/png" ? "png" : mime === "image/jpeg" ? "jpg" : "webp";
     const key = `screenshots/${id}.${ext}`;
     await deps.storage.put(key, bytes, mime);
     const updated = await deps.store.attachScreenshot(id, key);
-    if (!updated) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    }
+    if (!updated) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
     return c.json(updated);
   });
 
-  // ---- Screenshot read (public so <img src> works without auth dance) ----
+  // -------------------- Screenshot read (public) --------------------
   app.get("/v1/feedback/:id/screenshot", async (c) => {
     const id = c.req.param("id");
     const fb = await deps.store.get(id);
@@ -246,9 +355,7 @@ export function createApp(deps: AppDeps): Hono {
       return c.json({ error: { code: "feedback_not_found", message: "no screenshot" } }, 404);
     }
     const blob = await deps.storage.get(fb.screenshotKey);
-    if (!blob) {
-      return c.json({ error: { code: "feedback_not_found", message: "no screenshot" } }, 404);
-    }
+    if (!blob) return c.json({ error: { code: "feedback_not_found", message: "no screenshot" } }, 404);
     return new Response(blob.body as BodyInit, {
       status: 200,
       headers: {
@@ -258,7 +365,6 @@ export function createApp(deps: AppDeps): Hono {
     });
   });
 
-  // Catch-all error handler so unhandled exceptions don't leak stack traces.
   app.onError((err, c) => {
     logger.error("unhandled error", {
       method: c.req.method,
@@ -271,10 +377,19 @@ export function createApp(deps: AppDeps): Hono {
   return app;
 }
 
-/**
- * Build the production app from environment configuration.
- */
-export async function createAppFromEnv(env: ApiEnv): Promise<Hono> {
+async function safeJson(c: { req: { json: () => Promise<unknown> } }): Promise<unknown | null> {
+  try {
+    return await c.req.json();
+  } catch {
+    return null;
+  }
+}
+
+function validation(c: { json: (body: unknown, status: number) => Response }, message: string): Response {
+  return c.json({ error: { code: "validation", message } }, 400);
+}
+
+export async function createAppFromEnv(env: ApiEnv): Promise<Hono<{ Variables: AppVariables }>> {
   const storage = new LocalDiskDriver({ rootDir: env.STORAGE_DIR });
   await storage.ensureRoot();
   let store: FeedbackStore;

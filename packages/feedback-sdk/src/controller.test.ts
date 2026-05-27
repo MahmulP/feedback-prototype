@@ -17,29 +17,29 @@ afterEach(() => {
 
 describe("initFeedback controller", () => {
   it("attaches a Shadow DOM host to <body>", () => {
-    const ctrl = initFeedback({ projectId: "demo", transport: createMockTransport() });
+    const ctrl = initFeedback({ transport: createMockTransport() });
     const host = document.querySelector("[data-mahmulp-feedback-host]");
     expect(host).toBeTruthy();
     ctrl.destroy();
   });
 
   it("removes its host on destroy", () => {
-    const ctrl = initFeedback({ projectId: "demo", transport: createMockTransport() });
+    const ctrl = initFeedback({ transport: createMockTransport() });
     expect(document.querySelector("[data-mahmulp-feedback-host]")).toBeTruthy();
     ctrl.destroy();
     expect(document.querySelector("[data-mahmulp-feedback-host]")).toBeNull();
   });
 
   it("throws when neither apiUrl nor transport is provided", () => {
-    expect(() => initFeedback({ projectId: "demo" })).toThrow();
+    expect(() => initFeedback({})).toThrow();
+  });
+
+  it("throws when apiUrl is provided without apiKey", () => {
+    expect(() => initFeedback({ apiUrl: "http://localhost:8787" })).toThrow();
   });
 
   it("setEnabled toggles the controller state", () => {
-    const ctrl = initFeedback({
-      projectId: "demo",
-      transport: createMockTransport(),
-      enabled: false,
-    });
+    const ctrl = initFeedback({ transport: createMockTransport(), enabled: false });
     expect(ctrl.isEnabled()).toBe(false);
     ctrl.setEnabled(true);
     expect(ctrl.isEnabled()).toBe(true);
@@ -56,7 +56,7 @@ describe("initFeedback controller", () => {
       viewport: { width: 1024, height: 768, devicePixelRatio: 1 },
     });
 
-    const ctrl = initFeedback({ projectId: "demo", transport });
+    const ctrl = initFeedback({ transport });
     await ctrl.refresh();
     await new Promise((r) => requestAnimationFrame(() => r(null)));
 
@@ -72,13 +72,10 @@ describe("initFeedback controller", () => {
 
     const fakeBlob = new Blob(["x"], { type: "image/png" });
     const ctrl = initFeedback({
-      projectId: "demo",
       transport: transport as FeedbackTransport,
       captureScreenshot: async () => fakeBlob,
     });
 
-    // Drive the create + upload sequence directly so we don't fight happy-dom's
-    // synthetic event quirks. The controller still owns the upload chain.
     const fb: Feedback = await transport.create({
       projectId: "demo",
       pageUrl: "/",
@@ -94,12 +91,10 @@ describe("initFeedback controller", () => {
   it("can disable screenshot capture", () => {
     const captureSpy = vi.fn(async () => null);
     const ctrl = initFeedback({
-      projectId: "demo",
       transport: createMockTransport(),
       captureScreenshots: false,
       captureScreenshot: captureSpy,
     });
-    // Capture must not be invoked just by initializing.
     expect(captureSpy).not.toHaveBeenCalled();
     ctrl.destroy();
   });
@@ -109,7 +104,7 @@ describe("initFeedback controller", () => {
     // @ts-expect-error: simulate SSR
     delete globalThis.window;
     try {
-      const ctrl = initFeedback({ projectId: "demo", transport: createMockTransport() });
+      const ctrl = initFeedback({ transport: createMockTransport() });
       expect(ctrl.isEnabled()).toBe(false);
       ctrl.setEnabled(true);
       expect(ctrl.isEnabled()).toBe(false);

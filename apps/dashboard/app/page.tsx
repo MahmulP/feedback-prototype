@@ -1,5 +1,10 @@
 import { redirect } from "next/navigation";
 
-export default function Home() {
-  redirect("/projects");
+import { api } from "@/lib/api";
+
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const me = await api.me();
+  redirect(me ? "/projects" : "/login");
 }

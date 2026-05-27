@@ -1,30 +1,62 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import type {
-  CreateFeedbackInput,
   Feedback,
-  FeedbackAuthor,
   FeedbackCoordinates,
   FeedbackStatus,
-  ListFeedbackQuery,
+  Project,
+  ProjectApiKeyMetadata,
+  ProjectSummary,
+  User,
 } from "@mahmulp/shared-types";
 
-import type { FeedbackStore, ProjectSummary } from "../store.js";
+import type { FeedbackStore } from "../store.js";
 import type { DrizzleDb } from "./client.js";
-import { feedback as feedbackTable, type ThreadComment } from "./schema.js";
+import {
+  feedback as feedbackTable,
+  projectApiKeys as keyTable,
+  projects as projectsTable,
+  type ThreadComment,
+  users as usersTable,
+} from "./schema.js";
 
 /**
- * Drizzle-backed `FeedbackStore` implementation against PostgreSQL.
- *
- * Same interface as the in-memory store; routes can switch over without
- * changes when a `DATABASE_URL` is configured.
+ * Drizzle-backed FeedbackStore. Wired up when `DATABASE_URL` is configured.
  */
 export function createDbStore(db: DrizzleDb): FeedbackStore {
-  function nowIso(): string {
-    return new Date().toISOString();
+  const generateId = (prefix: string) =>
+    `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const nowIso = () => new Date().toISOString();
+
+  function rowToProject(row: typeof projectsTable.$inferSelect): Project {
+    return {
+      id: row.id,
+      ownerId: row.ownerId,
+      slug: row.slug,
+      name: row.name,
+      ...(row.description ? { description: row.description } : {}),
+      allowedOrigins: row.allowedOrigins ?? [],
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+    };
   }
 
-  function generateId(prefix: string): string {
-    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  function rowToUser(row: typeof usersTable.$inferSelect): User {
+    return {
+      id: row.id,
+      email: row.email,
+      name: row.name,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  function rowToKey(row: typeof keyTable.$inferSelect): ProjectApiKeyMetadata {
+    return {
+      id: row.id,
+      projectId: row.projectId,
+      prefix: row.prefix,
+      createdAt: row.createdAt.toISOString(),
+      ...(row.lastUsedAt ? { lastUsedAt: row.lastUsedAt.toISOString() } : {}),
+    };
   }
 
   function rowToFeedback(row: typeof feedbackTable.$inferSelect): Feedback {
@@ -53,7 +85,167 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
   }
 
   return {
-    async list(query: ListFeedbackQuery): Promise<Feedback[]> {
+    // ---------------- users ----------------
+    async createUser(input) {
+      try {
+        const [row] = await db
+          .insert(usersTable)
+          .values({
+            id: generateId("usr"),
+            email: input.email.toLowerCase(),
+            name: input.name,
+            passwordHash: input.passwordHash,
+          })
+          .returning();
+        if (!row) throw new Error("createUser: insert returned no row");
+        return rowToUser(row);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "23505") throw new Error("user_exists");
+        throw err;
+      }
+    },
+
+    async getUserByEmail(email) {
+      const [row] = await db
+        .select()
+        .from(usersTable)
+        .where(eq(usersTable.email, email.toLowerCase()))
+        .limit(1);
+      if (!row) return null;
+      return { user: rowToUser(row), passwordHash: row.passwordHash };
+    },
+
+    async getUserById(id) {
+      const [row] = await db.select().from(usersTable).where(eq(usersTable.id, id)).limit(1);
+      return row ? rowToUser(row) : null;
+    },
+
+    // ---------------- projects ----------------
+    async createProject(ownerId, input) {
+      try {
+        const [row] = await db
+          .insert(projectsTable)
+          .values({
+            id: generateId("prj"),
+            ownerId,
+            slug: input.slug.toLowerCase(),
+            name: input.name,
+            ...(input.description ? { description: input.description } : {}),
+            allowedOrigins: input.allowedOrigins ?? [],
+          })
+          .returning();
+        if (!row) throw new Error("createProject: insert returned no row");
+        return rowToProject(row);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "23505") throw new Error("project_exists");
+        throw err;
+      }
+    },
+
+    async getProject(slug) {
+      const [row] = await db
+        .select()
+        .from(projectsTable)
+        .where(eq(projectsTable.slug, slug.toLowerCase()))
+        .limit(1);
+      return row ? rowToProject(row) : null;
+    },
+
+    async listProjectsForOwner(ownerId) {
+      const rows = await db
+        .select({
+          project: projectsTable,
+          totalFeedback: sql<number>`(select count(*) from ${feedbackTable} where ${feedbackTable.projectId} = ${projectsTable.slug})`,
+          openFeedback: sql<number>`(select count(*) from ${feedbackTable} where ${feedbackTable.projectId} = ${projectsTable.slug} and ${feedbackTable.status} = 'open')`,
+        })
+        .from(projectsTable)
+        .where(eq(projectsTable.ownerId, ownerId))
+        .orderBy(desc(projectsTable.createdAt));
+      return rows.map((r): ProjectSummary => ({
+        ...rowToProject(r.project),
+        totalFeedback: Number(r.totalFeedback),
+        openFeedback: Number(r.openFeedback),
+      }));
+    },
+
+    async updateProject(slug, ownerId, input) {
+      const set: Record<string, unknown> = { updatedAt: new Date() };
+      if (input.name !== undefined) set.name = input.name;
+      if (input.description !== undefined) set.description = input.description;
+      if (input.allowedOrigins !== undefined) set.allowedOrigins = input.allowedOrigins;
+      const [row] = await db
+        .update(projectsTable)
+        .set(set)
+        .where(and(eq(projectsTable.slug, slug.toLowerCase()), eq(projectsTable.ownerId, ownerId)))
+        .returning();
+      return row ? rowToProject(row) : null;
+    },
+
+    async deleteProject(slug, ownerId) {
+      const [row] = await db
+        .delete(projectsTable)
+        .where(and(eq(projectsTable.slug, slug.toLowerCase()), eq(projectsTable.ownerId, ownerId)))
+        .returning();
+      if (!row) return false;
+      // Cascade: drop keys and feedback referencing this project.
+      await db.delete(keyTable).where(eq(keyTable.projectId, row.id));
+      await db.delete(feedbackTable).where(eq(feedbackTable.projectId, row.slug));
+      return true;
+    },
+
+    // ---------------- project api keys ----------------
+    async createProjectApiKey(projectId, input) {
+      const [row] = await db
+        .insert(keyTable)
+        .values({
+          id: generateId("pk"),
+          projectId,
+          keyHash: input.keyHash,
+          prefix: input.prefix,
+        })
+        .returning();
+      if (!row) throw new Error("createProjectApiKey: insert returned no row");
+      return rowToKey(row);
+    },
+
+    async listProjectApiKeys(projectId) {
+      const rows = await db
+        .select()
+        .from(keyTable)
+        .where(eq(keyTable.projectId, projectId))
+        .orderBy(keyTable.createdAt);
+      return rows.map(rowToKey);
+    },
+
+    async deleteProjectApiKey(id, projectId) {
+      const [row] = await db
+        .delete(keyTable)
+        .where(and(eq(keyTable.id, id), eq(keyTable.projectId, projectId)))
+        .returning();
+      return Boolean(row);
+    },
+
+    async resolveProjectByKeyHash(keyHash) {
+      const [row] = await db
+        .select({ key: keyTable, project: projectsTable })
+        .from(keyTable)
+        .innerJoin(projectsTable, eq(projectsTable.id, keyTable.projectId))
+        .where(eq(keyTable.keyHash, keyHash))
+        .limit(1);
+      if (!row) return null;
+      // Touch last_used_at, fire-and-forget.
+      void db
+        .update(keyTable)
+        .set({ lastUsedAt: new Date() })
+        .where(eq(keyTable.id, row.key.id))
+        .catch(() => {});
+      return rowToProject(row.project);
+    },
+
+    // ---------------- feedback ----------------
+    async list(query) {
       const filters = [eq(feedbackTable.projectId, query.projectId)];
       if (query.pageUrl) filters.push(eq(feedbackTable.pageUrl, query.pageUrl));
       if (query.status) filters.push(eq(feedbackTable.status, query.status));
@@ -66,12 +258,12 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       return rows.map(rowToFeedback);
     },
 
-    async get(id: string): Promise<Feedback | null> {
+    async get(id) {
       const [row] = await db.select().from(feedbackTable).where(eq(feedbackTable.id, id)).limit(1);
       return row ? rowToFeedback(row) : null;
     },
 
-    async create(input: CreateFeedbackInput): Promise<Feedback> {
+    async create(input) {
       const id = generateId("fb");
       const initialThread: ThreadComment[] = input.comment
         ? [
@@ -105,10 +297,7 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       return rowToFeedback(row);
     },
 
-    async reply(
-      id: string,
-      comment: { author: FeedbackAuthor; body: string }
-    ): Promise<Feedback | null> {
+    async reply(id, comment) {
       const [existing] = await db
         .select()
         .from(feedbackTable)
@@ -132,7 +321,7 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       return row ? rowToFeedback(row) : null;
     },
 
-    async setStatus(id: string, status: FeedbackStatus): Promise<Feedback | null> {
+    async setStatus(id, status: FeedbackStatus) {
       const [row] = await db
         .update(feedbackTable)
         .set({ status, updatedAt: new Date() })
@@ -141,16 +330,7 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       return row ? rowToFeedback(row) : null;
     },
 
-    async attachScreenshot(id: string, key: string): Promise<Feedback | null> {
-      const [row] = await db
-        .update(feedbackTable)
-        .set({ screenshotKey: key, updatedAt: new Date() })
-        .where(eq(feedbackTable.id, id))
-        .returning();
-      return row ? rowToFeedback(row) : null;
-    },
-
-    async setCoordinates(id: string, coordinates: FeedbackCoordinates): Promise<Feedback | null> {
+    async setCoordinates(id, coordinates: FeedbackCoordinates) {
       const [row] = await db
         .update(feedbackTable)
         .set({
@@ -165,22 +345,17 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       return row ? rowToFeedback(row) : null;
     },
 
-    async listProjects(): Promise<ProjectSummary[]> {
-      const rows = await db
-        .select({
-          projectId: feedbackTable.projectId,
-          totalFeedback: sql<number>`count(*)`,
-          openFeedback: sql<number>`count(*) FILTER (WHERE ${feedbackTable.status} = 'open')`,
-        })
-        .from(feedbackTable)
-        .groupBy(feedbackTable.projectId)
-        .orderBy(feedbackTable.projectId);
-
-      return rows.map((r) => ({
-        projectId: r.projectId,
-        totalFeedback: Number(r.totalFeedback),
-        openFeedback: Number(r.openFeedback),
-      }));
+    async attachScreenshot(id, key: string) {
+      const [row] = await db
+        .update(feedbackTable)
+        .set({ screenshotKey: key, updatedAt: new Date() })
+        .where(eq(feedbackTable.id, id))
+        .returning();
+      return row ? rowToFeedback(row) : null;
     },
   };
 }
+
+// Note-to-future-me: silenced "unused" for the few helpers we re-exported in
+// case routes need raw access during a future debug session.
+void count;
