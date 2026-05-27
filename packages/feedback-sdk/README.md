@@ -1,7 +1,8 @@
 # @mahmulp/feedback-sdk
 
 [![npm](https://img.shields.io/npm/v/@mahmulp/feedback-sdk.svg)](https://www.npmjs.com/package/@mahmulp/feedback-sdk)
-[![npm bundle size](https://img.shields.io/bundlephobia/minzip/@mahmulp/feedback-sdk)](https://bundlephobia.com/package/@mahmulp/feedback-sdk)
+[![types](https://img.shields.io/npm/types/@mahmulp/feedback-sdk.svg)](https://www.npmjs.com/package/@mahmulp/feedback-sdk)
+[![license](https://img.shields.io/npm/l/@mahmulp/feedback-sdk.svg)](./LICENSE)
 
 Framework-agnostic visual feedback SDK for prototype review. Reviewers pin comments to UI elements; you get back a stable DOM selector, percentage + pixel coordinates, viewport metadata, and an optional screenshot.
 
