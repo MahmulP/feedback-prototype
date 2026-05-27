@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck · Test · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck — shared-types
+        run: bunx tsc --noEmit -p packages/shared-types
+
+      - name: Typecheck — feedback-sdk
+        run: bunx tsc --noEmit -p packages/feedback-sdk
+
+      - name: Typecheck — api
+        run: bunx tsc --noEmit -p apps/api
+
+      - name: Typecheck — dashboard
+        run: bunx tsc --noEmit -p apps/dashboard
+
+      - name: Test — feedback-sdk
+        working-directory: packages/feedback-sdk
+        run: bunx vitest --run
+
+      - name: Test — api
+        working-directory: apps/api
+        run: bunx vitest --run
+
+      - name: Build — feedback-sdk
+        working-directory: packages/feedback-sdk
+        run: bunx tsup
+
+      - name: Build — dashboard
+        working-directory: apps/dashboard
+        run: bunx next build
+
+      - name: Smoke (API + script)
+        run: |
+          bun --cwd apps/api run src/server.ts &
+          API_PID=$!
+          for i in {1..30}; do
+            if curl -fs http://localhost:8787/health > /dev/null; then break; fi
+            sleep 1
+          done
+          bun run scripts/e2e-smoke.ts
+          kill $API_PID || true

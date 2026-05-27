@@ -1,36 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Feedback Prototype
 
-## Getting Started
+Open-source, self-hosted visual feedback platform for web prototypes. Pin comments directly to UI elements, track threads, manage status â€” without the manual screenshot + chat dance.
 
-First, run the development server:
+This is a **Bun workspace monorepo**.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Layout
+
+```
+apps/
+  dashboard/         # Next.js + React dashboard
+packages/
+  feedback-sdk/      # @mahmulp/feedback-sdk â€” framework-agnostic SDK (Svelte primary)
+  shared-types/      # @mahmulp/shared-types â€” wire types shared across apps & SDK
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The backend API (`apps/api`) lands in a follow-up iteration. The SDK ships with a tiny in-memory transport for local development, swappable for HTTP later.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Getting started
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+# install everything
+bun install
 
-## Learn More
+# build the SDK
+bun run build:sdk
 
-To learn more about Next.js, take a look at the following resources:
+# run the dashboard (Next.js scaffold for now)
+bun run dev:dashboard
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Steering & specs
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Project-wide conventions live under [`.kiro/steering/`](./.kiro/steering/):
 
-## Deploy on Vercel
+- `product.md` â€” vision and scope
+- `tech.md` â€” stack and tooling
+- `structure.md` â€” monorepo conventions
+- `feedback-data-model.md` â€” shared wire format
+- `sdk-conventions.md`, `dashboard-conventions.md`, `api-conventions.md` â€” per-package rules
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Read them before changing fundamentals.

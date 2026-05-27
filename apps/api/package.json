@@ -1,0 +1,27 @@
+{
+  "name": "@mahmulp/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot run src/server.ts",
+    "start": "bun run src/server.ts",
+    "test": "vitest --run",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'no lint configured for api yet'"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@mahmulp/shared-types": "workspace:*",
+    "drizzle-orm": "^0.36.4",
+    "hono": "^4.6.10",
+    "postgres": "^3.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "drizzle-kit": "^0.28.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.5"
+  }
+}
