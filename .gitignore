@@ -46,3 +46,7 @@ next-env.d.ts
 
 # api local storage (screenshots)
 apps/api/data/
+
+# svelte-kit build output
+.svelte-kit/
+

@@ -1,6 +1,7 @@
 import type { Feedback } from "@mahmulp/shared-types";
 import { findElement } from "./selector.js";
 import { projectCoordinates } from "./coordinates.js";
+import { LauncherManager, type LauncherCallbacks } from "./launcher.js";
 import { PopoverManager } from "./popover.js";
 
 /**
@@ -80,6 +81,109 @@ const OVERLAY_STYLES = `
 .pin.resolved { background: #2F7A4D; }
 .pin.archived { background: #6B7280; }
 .pin.dragging { cursor: grabbing; transform: rotate(-45deg) scale(1.18); }
+
+.pinLayer.hidden { display: none; }
+
+/* ---------- Floating launcher ---------- */
+.launcher {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #1F5132;
+  border: 1px solid rgba(31, 81, 50, 0.18);
+  border-radius: 999px;
+  box-shadow: 0 12px 24px -10px rgba(15, 35, 24, 0.32),
+              0 4px 8px -2px rgba(15, 35, 24, 0.16);
+  pointer-events: auto;
+  z-index: 5;
+  font: 600 12px/1 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  user-select: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.launcher.hidden {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+.launcher-btn {
+  appearance: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease;
+}
+.launcher-btn:hover { background: rgba(31, 81, 50, 0.08); }
+.launcher-btn:focus-visible {
+  outline: 2px solid #1F5132;
+  outline-offset: 2px;
+}
+.launcher-btn svg { width: 18px; height: 18px; pointer-events: none; }
+.launcher-btn.primary {
+  background: #1F5132;
+  color: #F5FFF8;
+  width: auto;
+  padding: 0 14px 0 12px;
+  border-radius: 999px;
+  gap: 6px;
+}
+.launcher-btn.primary:hover { background: #265E3B; }
+.launcher-btn.primary.active {
+  background: #B91C1C;
+  color: #FFE8E8;
+}
+.launcher-btn.primary.active:hover { background: #A11616; }
+.launcher-divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(31, 81, 50, 0.14);
+}
+.launcher-btn.muted { color: #6B7280; }
+
+/* ---------- Re-show launcher pill ---------- */
+.launcher-reveal {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: #1F5132;
+  color: #F5FFF8;
+  border: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 8px 16px -8px rgba(15, 35, 24, 0.4);
+  z-index: 5;
+}
+.launcher-reveal.visible { display: inline-flex; }
+.launcher-reveal:hover { background: #265E3B; }
+.launcher-reveal svg { width: 18px; height: 18px; }
+
+@media (prefers-color-scheme: dark) {
+  .launcher {
+    background: #0F1F17;
+    color: #B6D8C5;
+    border-color: rgba(120, 200, 160, 0.22);
+  }
+  .launcher-btn.primary { color: #0F1F17; background: #B6D8C5; }
+  .launcher-btn.primary:hover { background: #C7E2D2; }
+  .launcher-divider { background: rgba(120, 200, 160, 0.22); }
+}
 
 .popover-layer {
   position: fixed;
@@ -285,6 +389,7 @@ export class Overlay {
   private pinLayer: HTMLDivElement;
   private popoverLayer: HTMLDivElement;
   private popover: PopoverManager;
+  private launcher: LauncherManager | null = null;
   private rafHandle: number | null = null;
   private pendingFeedback: Feedback[] = [];
   private onPinClick: PinClickHandler | null = null;
@@ -369,7 +474,14 @@ export class Overlay {
   /** True if the event originated from the SDK's own UI (so we ignore it). */
   ownsEvent(event: Event): boolean {
     const path = event.composedPath();
-    return path.includes(this.host) || path.some((n) => n === this.root);
+    if (path.includes(this.host)) return true;
+    if (path.some((n) => n === this.root)) return true;
+    if (this.launcher) {
+      for (const node of path) {
+        if (this.launcher.ownsNode(node as Element | EventTarget)) return true;
+      }
+    }
+    return false;
   }
 
   /** True if the event originated from the popover specifically. */
@@ -397,6 +509,18 @@ export class Overlay {
 
   popoverManager(): PopoverManager {
     return this.popover;
+  }
+
+  /** Wire the floating launcher to controller callbacks. Idempotent. */
+  installLauncher(callbacks: LauncherCallbacks): LauncherManager {
+    if (this.launcher) return this.launcher;
+    this.launcher = new LauncherManager(this.root, callbacks);
+    return this.launcher;
+  }
+
+  /** Show or hide the pin layer entirely (e.g. via the eye toggle). */
+  setPinsVisible(visible: boolean): void {
+    this.pinLayer.classList.toggle("hidden", !visible);
   }
 
   private scheduleRepositionPins() {
@@ -443,6 +567,8 @@ export class Overlay {
       this.rafHandle = null;
     }
     this.popover.hide();
+    this.launcher?.destroy();
+    this.launcher = null;
     this.host.remove();
   }
 

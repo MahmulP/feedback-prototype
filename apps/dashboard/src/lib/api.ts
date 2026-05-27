@@ -1,27 +1,30 @@
 import "server-only";
-import type { Feedback, FeedbackStatus } from "@mahmulp/shared-types";
+import { cookies } from "next/headers";
+import type {
+  Feedback,
+  FeedbackStatus,
+  Project,
+  ProjectApiKeyMetadata,
+  ProjectApiKeyIssued,
+  ProjectSummary,
+  User,
+} from "@mahmulp/shared-types";
 import { serverEnv } from "./env";
 
-export interface ProjectSummary {
-  projectId: string;
-  totalFeedback: number;
-  openFeedback: number;
-}
-
 /**
- * Server-side API client. Used from Server Components, Route Handlers, and
- * Server Actions. Forwards the dashboard service key when configured.
- *
- * Browser code never imports this module â€” `import "server-only"` ensures
- * the bundle errors at build time if it ever does.
+ * Server-side API client. Forwards the user's session cookie to the API so
+ * every request is authenticated as the logged-in dashboard user. Browser
+ * code never imports this file (`import "server-only"` enforces it).
  */
 
 interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
   query?: Record<string, string | undefined>;
+  /** When true, do *not* attach the session cookie (useful for the login route). */
+  anonymous?: boolean;
 }
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
@@ -40,11 +43,14 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       if (v !== undefined && v !== "") url.searchParams.set(k, v);
     }
   }
-
   const headers = new Headers(opts.headers);
   headers.set("accept", "application/json");
   if (opts.body !== undefined) headers.set("content-type", "application/json");
-  if (env.DASHBOARD_API_KEY) headers.set("x-dashboard-key", env.DASHBOARD_API_KEY);
+  if (!opts.anonymous) {
+    const cookieStore = await cookies();
+    const session = cookieStore.get("mahmulp_session");
+    if (session) headers.set("cookie", `mahmulp_session=${session.value}`);
+  }
 
   const res = await fetch(url, {
     ...opts,
@@ -61,33 +67,111 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
       if (data?.error?.code) code = data.error.code;
       if (data?.error?.message) message = data.error.message;
     } catch {
-      /* ignore parse errors */
+      /* ignore */
     }
     throw new ApiError(res.status, code, message);
   }
-
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
+/** Returns the response Set-Cookie headers (used to echo session cookies through Server Actions). */
+async function rawRequest(path: string, opts: RequestOptions = {}): Promise<Response> {
+  const env = serverEnv();
+  const url = new URL(path, env.FEEDBACK_API_URL);
+  const headers = new Headers(opts.headers);
+  headers.set("accept", "application/json");
+  if (opts.body !== undefined) headers.set("content-type", "application/json");
+  return fetch(url, {
+    ...opts,
+    headers,
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    cache: "no-store",
+  });
+}
+
 export const api = {
-  /** Health check â€” used to render an "API offline" banner instead of crashing the dashboard. */
   async health(): Promise<{ ok: boolean }> {
     try {
-      return await request<{ ok: boolean }>("/health");
+      return await request<{ ok: boolean }>("/health", { anonymous: true });
     } catch {
       return { ok: false };
     }
   },
 
-  async listFeedback(query: {
-    projectId: string;
-    pageUrl?: string;
-    status?: FeedbackStatus;
-  }): Promise<{ items: Feedback[] }> {
-    return request<{ items: Feedback[] }>("/v1/feedback", { query });
+  // --- auth (returns a Response so server actions can echo Set-Cookie)
+  async signup(input: { email: string; password: string; name: string }) {
+    return rawRequest("/v1/auth/signup", { method: "POST", body: input });
+  },
+  async login(input: { email: string; password: string }) {
+    return rawRequest("/v1/auth/login", { method: "POST", body: input });
+  },
+  async logout() {
+    return rawRequest("/v1/auth/logout", { method: "POST" });
+  },
+  async me(): Promise<{ user: User } | null> {
+    try {
+      return await request<{ user: User }>("/v1/auth/me");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) return null;
+      throw err;
+    }
   },
 
+  // --- projects
+  async listProjects(): Promise<{ items: ProjectSummary[] }> {
+    return request<{ items: ProjectSummary[] }>("/v1/projects");
+  },
+  async createProject(input: {
+    slug: string;
+    name: string;
+    description?: string;
+    allowedOrigins?: string[];
+  }): Promise<Project> {
+    return request<Project>("/v1/projects", { method: "POST", body: input });
+  },
+  async getProject(slug: string): Promise<Project | null> {
+    try {
+      return await request<Project>(`/v1/projects/${encodeURIComponent(slug)}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  },
+  async updateProject(
+    slug: string,
+    input: { name?: string; description?: string; allowedOrigins?: string[] }
+  ): Promise<Project> {
+    return request<Project>(`/v1/projects/${encodeURIComponent(slug)}`, {
+      method: "PATCH",
+      body: input,
+    });
+  },
+  async deleteProject(slug: string): Promise<void> {
+    await request<{ ok: true }>(`/v1/projects/${encodeURIComponent(slug)}`, { method: "DELETE" });
+  },
+
+  // --- project API keys
+  async listProjectKeys(slug: string): Promise<{ items: ProjectApiKeyMetadata[] }> {
+    return request<{ items: ProjectApiKeyMetadata[] }>(`/v1/projects/${encodeURIComponent(slug)}/keys`);
+  },
+  async issueProjectKey(slug: string): Promise<ProjectApiKeyIssued> {
+    return request<ProjectApiKeyIssued>(`/v1/projects/${encodeURIComponent(slug)}/keys`, {
+      method: "POST",
+      body: {},
+    });
+  },
+  async deleteProjectKey(slug: string, keyId: string): Promise<void> {
+    await request<{ ok: true }>(
+      `/v1/projects/${encodeURIComponent(slug)}/keys/${encodeURIComponent(keyId)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  // --- feedback (dashboard reads, scoped to owner)
+  async listFeedback(slug: string, query: { pageUrl?: string; status?: FeedbackStatus } = {}): Promise<{ items: Feedback[] }> {
+    return request<{ items: Feedback[] }>(`/v1/projects/${encodeURIComponent(slug)}/feedback`, { query });
+  },
   async getFeedback(id: string): Promise<Feedback | null> {
     try {
       return await request<Feedback>(`/v1/feedback/${encodeURIComponent(id)}`);
@@ -96,19 +180,12 @@ export const api = {
       throw err;
     }
   },
-
-  /** List the distinct projectIds we've seen so the dashboard can show a project list. */
-  async listProjects(): Promise<{ items: ProjectSummary[] }> {
-    return request<{ items: ProjectSummary[] }>("/v1/projects");
-  },
-
   async setStatus(id: string, status: FeedbackStatus): Promise<Feedback> {
     return request<Feedback>(`/v1/feedback/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: { status },
     });
   },
-
   async reply(id: string, comment: { author: { name: string; email?: string }; body: string }): Promise<Feedback> {
     return request<Feedback>(`/v1/feedback/${encodeURIComponent(id)}/comments`, {
       method: "POST",
@@ -116,10 +193,7 @@ export const api = {
     });
   },
 
-  /** URL the browser hits directly for screenshot images. Built from public env. */
   screenshotUrl(id: string): string {
     return `${process.env.NEXT_PUBLIC_FEEDBACK_API_URL ?? ""}/v1/feedback/${encodeURIComponent(id)}/screenshot`;
   },
 };
-
-export { ApiError };

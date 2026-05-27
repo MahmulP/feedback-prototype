@@ -10,7 +10,7 @@
  *     const enabled = feedbackEnabled()
  *   </script>
  *
- *   <div use:feedback={{ apiUrl: '/api', projectId: 'demo' }}>
+ *   <div use:feedback={{ apiUrl: '/api', apiKey: 'mp_…' }}>
  *     <slot />
  *   </div>
  *
@@ -30,7 +30,7 @@ export interface FeedbackAction {
 }
 
 /**
- * Svelte action: `use:feedback={{ apiUrl, projectId }}`.
+ * Svelte action: `use:feedback={{ apiUrl, apiKey }}`.
  *
  * The action is a no-op during SSR (`initFeedback` already returns an SSR-safe
  * controller, but we still skip it to avoid even constructing the host).
@@ -46,12 +46,11 @@ export function feedback(node: HTMLElement, params: FeedbackActionParams): Feedb
 
   return {
     update(next: FeedbackActionParams) {
-      // If the projectId / apiUrl meaningfully change, restart.
+      // If the apiKey / apiUrl meaningfully change, restart.
       const restart =
-        next.projectId !== lastParams.projectId ||
+        next.apiKey !== lastParams.apiKey ||
         next.apiUrl !== lastParams.apiUrl ||
-        next.transport !== lastParams.transport ||
-        next.apiKey !== lastParams.apiKey;
+        next.transport !== lastParams.transport;
       lastParams = next;
       if (restart && controller) {
         controller.destroy();

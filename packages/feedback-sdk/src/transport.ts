@@ -5,42 +5,51 @@ import type {
   FeedbackCoordinates,
   FeedbackStatus,
   FeedbackTransport,
-  ListFeedbackQuery,
   ListFeedbackResult,
 } from "@mahmulp/shared-types";
 
 export type { FeedbackTransport };
 
 /**
- * Default HTTP transport: talks to a Hono-style API at `apiUrl`.
- * Endpoints assumed (subject to confirmation when the API is implemented):
+ * Default HTTP transport: talks to the API at `apiUrl` using a per-project
+ * API key (`apiKey`, sent as `x-feedback-key`).
  *
- *   GET    /v1/feedback?projectId=â€¦&pageUrl=â€¦&status=â€¦
+ *   GET    /v1/feedback?pageUrl=…&status=…
  *   POST   /v1/feedback
  *   POST   /v1/feedback/:id/comments
- *   PATCH  /v1/feedback/:id  { status }
- *   POST   /v1/feedback/:id/screenshot   (multipart, field "file")
+ *   PATCH  /v1/feedback/:id  { status }                  (admin-only; SDK rarely calls this)
+ *   PATCH  /v1/feedback/:id/coordinates  { coordinates } (drag-to-move)
+ *   POST   /v1/feedback/:id/screenshot                   (multipart, field "file")
+ *
+ * The SDK never sends `projectId` — the server resolves the project from
+ * the API key.
  */
 export interface HttpTransportOptions {
   apiUrl: string;
-  /** Per-project ingest key sent as `x-feedback-key`. */
-  apiKey?: string;
+  /** Per-project ingest key sent as `x-feedback-key`. Required. */
+  apiKey: string;
   fetch?: typeof fetch;
   headers?: Record<string, string>;
 }
 
 export function createHttpTransport(options: HttpTransportOptions): FeedbackTransport {
+  if (!options.apiKey) {
+    throw new Error("createHttpTransport: `apiKey` is required");
+  }
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const base = options.apiUrl.replace(/\/$/, "");
 
   function jsonHeaders(): HeadersInit {
-    const h: Record<string, string> = {
+    return {
       "content-type": "application/json",
       accept: "application/json",
+      "x-feedback-key": options.apiKey,
       ...(options.headers ?? {}),
     };
-    if (options.apiKey) h["x-feedback-key"] = options.apiKey;
-    return h;
+  }
+
+  function authHeaders(): Record<string, string> {
+    return { "x-feedback-key": options.apiKey, ...(options.headers ?? {}) };
   }
 
   async function asJson<T>(res: Response): Promise<T> {
@@ -52,31 +61,33 @@ export function createHttpTransport(options: HttpTransportOptions): FeedbackTran
   }
 
   return {
-    async list(query: ListFeedbackQuery): Promise<ListFeedbackResult> {
+    async list(query): Promise<ListFeedbackResult> {
       const params = new URLSearchParams();
-      params.set("projectId", query.projectId);
       if (query.pageUrl) params.set("pageUrl", query.pageUrl);
       if (query.status) params.set("status", query.status);
-      const res = await fetchImpl(`${base}/v1/feedback?${params.toString()}`, {
+      const qs = params.toString();
+      const res = await fetchImpl(`${base}/v1/feedback${qs ? `?${qs}` : ""}`, {
         method: "GET",
         headers: jsonHeaders(),
       });
       return asJson<ListFeedbackResult>(res);
     },
 
-    async create(input: CreateFeedbackInput): Promise<Feedback> {
+    async create(input): Promise<Feedback> {
+      // The server fills in `projectId` from the API key; we never send it.
+      const { projectId: _ignored, ...payload } = input as CreateFeedbackInput & {
+        projectId?: string;
+      };
+      void _ignored;
       const res = await fetchImpl(`${base}/v1/feedback`, {
         method: "POST",
         headers: jsonHeaders(),
-        body: JSON.stringify(input),
+        body: JSON.stringify(payload),
       });
       return asJson<Feedback>(res);
     },
 
-    async reply(
-      feedbackId: string,
-      comment: { author: FeedbackAuthor; body: string }
-    ): Promise<Feedback> {
+    async reply(feedbackId, comment: { author: FeedbackAuthor; body: string }): Promise<Feedback> {
       const res = await fetchImpl(`${base}/v1/feedback/${encodeURIComponent(feedbackId)}/comments`, {
         method: "POST",
         headers: jsonHeaders(),
@@ -85,7 +96,7 @@ export function createHttpTransport(options: HttpTransportOptions): FeedbackTran
       return asJson<Feedback>(res);
     },
 
-    async setStatus(feedbackId: string, status: FeedbackStatus): Promise<Feedback> {
+    async setStatus(feedbackId, status: FeedbackStatus): Promise<Feedback> {
       const res = await fetchImpl(`${base}/v1/feedback/${encodeURIComponent(feedbackId)}`, {
         method: "PATCH",
         headers: jsonHeaders(),
@@ -94,26 +105,26 @@ export function createHttpTransport(options: HttpTransportOptions): FeedbackTran
       return asJson<Feedback>(res);
     },
 
-    async move(feedbackId: string, coordinates: FeedbackCoordinates): Promise<Feedback> {
-      const res = await fetchImpl(`${base}/v1/feedback/${encodeURIComponent(feedbackId)}/coordinates`, {
-        method: "PATCH",
-        headers: jsonHeaders(),
-        body: JSON.stringify({ coordinates }),
-      });
+    async move(feedbackId, coordinates: FeedbackCoordinates): Promise<Feedback> {
+      const res = await fetchImpl(
+        `${base}/v1/feedback/${encodeURIComponent(feedbackId)}/coordinates`,
+        {
+          method: "PATCH",
+          headers: jsonHeaders(),
+          body: JSON.stringify({ coordinates }),
+        }
+      );
       return asJson<Feedback>(res);
     },
 
-    async uploadScreenshot(feedbackId: string, blob: Blob): Promise<Feedback> {
+    async uploadScreenshot(feedbackId, blob: Blob): Promise<Feedback> {
       const form = new FormData();
       form.append("file", blob, `${feedbackId}.png`);
-      const headers: Record<string, string> = {};
-      if (options.apiKey) headers["x-feedback-key"] = options.apiKey;
-      if (options.headers) Object.assign(headers, options.headers);
       const res = await fetchImpl(
         `${base}/v1/feedback/${encodeURIComponent(feedbackId)}/screenshot`,
         {
           method: "POST",
-          headers,
+          headers: authHeaders(),
           body: form,
         }
       );

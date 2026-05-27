@@ -15,12 +15,15 @@ import { createHttpTransport } from "./transport.js";
 export interface InitFeedbackOptions {
   /** Base URL of the API (used when no `transport` is provided). */
   apiUrl?: string;
-  /** Project identifier. Required. */
-  projectId: string;
-  /** Per-project ingest key (sent as `x-feedback-key` to the API). */
+  /** Per-project ingest key (sent as `x-feedback-key` to the API). Required when using the HTTP transport. */
   apiKey?: string;
   /** Custom transport override. Useful for tests, mocks, or non-HTTP backends. */
   transport?: FeedbackTransport;
+  /**
+   * Identifier used for client-side caching (author identity per project).
+   * Defaults to `apiKey`'s prefix when omitted; safe to leave unset.
+   */
+  cacheNamespace?: string;
   /** Start with feedback mode enabled. Defaults to `false` (caller toggles via UI). */
   enabled?: boolean;
   /** Override how the page URL is captured. Defaults to `window.location.pathname + search`. */
@@ -38,6 +41,10 @@ export interface InitFeedbackOptions {
   captureScreenshots?: boolean;
   /** Override the screenshot capture function. Returns null to skip silently. */
   captureScreenshot?: () => Promise<Blob | null>;
+  /** Render the floating launcher widget. Defaults to `true`. */
+  showLauncher?: boolean;
+  /** Initial pin visibility. Defaults to `true`. */
+  pinsVisible?: boolean;
   /** Called when a pin is clicked in display mode. Use to render a thread popover. */
   onPinClick?: (feedback: Feedback) => void;
   /** Called after a new pin is created. */
@@ -51,6 +58,10 @@ export interface FeedbackController {
   setEnabled(enabled: boolean): void;
   /** Read the current enabled state. */
   isEnabled(): boolean;
+  /** Show or hide all pins (the floating launcher's eye toggle calls this). */
+  setPinsVisible(visible: boolean): void;
+  /** Show or hide the floating launcher widget. */
+  setLauncherVisible(visible: boolean): void;
   /** Trigger a fresh fetch of feedback for the current project. */
   refresh(): Promise<void>;
   /** Tear down: remove DOM, listeners, and observers. Idempotent. */
@@ -78,18 +89,20 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
     return ssrNoopController();
   }
 
-  if (!options.projectId) {
-    throw new Error("initFeedback: `projectId` is required");
-  }
-
   const transport: FeedbackTransport =
     options.transport ??
     (() => {
       if (!options.apiUrl) {
         throw new Error("initFeedback: provide either `transport` or `apiUrl`");
       }
+      if (!options.apiKey) {
+        throw new Error("initFeedback: `apiKey` is required when using the default HTTP transport");
+      }
       return createHttpTransport({ apiUrl: options.apiUrl, apiKey: options.apiKey });
     })();
+
+  const namespace =
+    options.cacheNamespace ?? (options.apiKey ? options.apiKey.slice(0, 12) : "default");
 
   const overlay = new Overlay();
 
@@ -107,11 +120,11 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
   const getPageUrl =
     options.getPageUrl ?? (() => window.location.pathname + window.location.search);
   const modKey = options.selectParentModifier ?? "Alt";
-  const getAuthor = options.getAuthor ?? (() => loadAuthor(options.projectId));
+  const getAuthor = options.getAuthor ?? (() => loadAuthor(namespace));
   const setAuthor =
     options.setAuthor ??
     ((author: FeedbackAuthor) => {
-      saveAuthor(options.projectId, author);
+      saveAuthor(namespace, author);
     });
   const wantsScreenshots = options.captureScreenshots !== false;
   const captureFn = options.captureScreenshot ?? (() => captureViewport());
@@ -189,6 +202,17 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
   }
 
   function onKeyDown(e: KeyboardEvent) {
+    // Global shortcut: Ctrl/⌘+Shift+F toggles feedback mode + reveals launcher.
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === "F" || e.key === "f")) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!launcherState.launcherVisible) {
+        launcherState.launcherVisible = true;
+        syncLauncher();
+      }
+      publicSetEnabled(!state.enabled);
+      return;
+    }
     if (e.key === "Escape") {
       if (pendingPin || activeThreadId) {
         cancelComposer();
@@ -330,7 +354,7 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
     const pageUrl = getPageUrl();
 
     const input: CreateFeedbackInput = {
-      projectId: options.projectId,
+      projectId: "", // server resolves from API key — kept here only to satisfy the type
       pageUrl,
       selector: pin.selector,
       coordinates: pin.coordinates,
@@ -351,7 +375,9 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
 
   async function refresh(): Promise<void> {
     try {
-      const result = await transport.list({ projectId: options.projectId });
+      // The transport's list() filters server-side by the API key's project,
+      // so we just pass an empty query and trust the response.
+      const result = await transport.list({ projectId: "" });
       state.feedbacks = result.items;
       overlay.renderPins(state.feedbacks, openThread, onPinDragEnd);
     } catch (err) {
@@ -395,20 +421,61 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
   void refresh();
   overlay.setEnabledStyles(state.enabled);
 
+  // ---------- Floating launcher ----------
+  const wantsLauncher = options.showLauncher !== false;
+  const launcherState = {
+    pinsVisible: options.pinsVisible !== false,
+    launcherVisible: true,
+  };
+  overlay.setPinsVisible(launcherState.pinsVisible);
+
+  function syncLauncher(): void {
+    launcher?.setEnabled(state.enabled);
+    launcher?.setPinsVisible(launcherState.pinsVisible);
+    launcher?.setLauncherVisible(launcherState.launcherVisible);
+  }
+
+  const launcher = wantsLauncher
+    ? overlay.installLauncher({
+        onToggleFeedback: () => {
+          publicSetEnabled(!state.enabled);
+        },
+        onTogglePins: () => {
+          publicSetPinsVisible(!launcherState.pinsVisible);
+        },
+        onHideLauncher: () => {
+          publicSetLauncherVisible(!launcherState.launcherVisible);
+        },
+      })
+    : null;
+  syncLauncher();
+
+  function publicSetEnabled(enabled: boolean) {
+    if (state.destroyed) return;
+    state.enabled = enabled;
+    overlay.setEnabledStyles(enabled);
+    if (!enabled) cancelComposer();
+    syncLauncher();
+  }
+  function publicSetPinsVisible(visible: boolean) {
+    if (state.destroyed) return;
+    launcherState.pinsVisible = visible;
+    overlay.setPinsVisible(visible);
+    syncLauncher();
+  }
+  function publicSetLauncherVisible(visible: boolean) {
+    if (state.destroyed) return;
+    launcherState.launcherVisible = visible;
+    syncLauncher();
+  }
+
   return {
-    setEnabled(enabled: boolean) {
-      if (state.destroyed) return;
-      state.enabled = enabled;
-      overlay.setEnabledStyles(enabled);
-      if (!enabled) {
-        cancelComposer();
-        // Thread popover stays open even when toggling off â€” matches user expectation
-        // that "off" means "stop creating new pins", not "lose what I'm reading".
-      }
-    },
+    setEnabled: publicSetEnabled,
     isEnabled() {
       return state.enabled;
     },
+    setPinsVisible: publicSetPinsVisible,
+    setLauncherVisible: publicSetLauncherVisible,
     async refresh() {
       if (state.destroyed) return;
       await refresh();
@@ -442,6 +509,8 @@ function ssrNoopController(): FeedbackController {
     isEnabled() {
       return false;
     },
+    setPinsVisible() {},
+    setLauncherVisible() {},
     async refresh() {},
     destroy() {},
   };

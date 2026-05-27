@@ -7,17 +7,69 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 /**
  * Postgres schema for the feedback platform.
  *
- * One table per top-level domain object. Comment thread is denormalized as
- * JSONB inside `feedback.thread` so a single SELECT returns the full thread
- * — the dashboard never wants a comment without its parent feedback, and
- * threads are typically short. If we ever need per-comment search, split
- * it into its own table.
+ * Tables:
+ *   - users            ← dashboard accounts
+ *   - projects         ← per-user projects, identified by slug
+ *   - project_api_keys ← per-project ingest keys (hashed; SDK uses these)
+ *   - feedback         ← pins, references project by slug for SDK ergonomics
  */
+
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    /** Argon2id (or scrypt) hash of the user's password. */
+    passwordHash: text("password_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    emailUnique: uniqueIndex("users_email_unique").on(t.email),
+  })
+);
+
+export const projects = pgTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description"),
+    allowedOrigins: jsonb("allowed_origins").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    slugUnique: uniqueIndex("projects_slug_unique").on(t.slug),
+    byOwner: index("projects_owner_idx").on(t.ownerId),
+  })
+);
+
+export const projectApiKeys = pgTable(
+  "project_api_keys",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    /** SHA-256 hex of the plaintext key. Plaintext is shown once at creation. */
+    keyHash: text("key_hash").notNull(),
+    /** First 8 chars of the plaintext key, kept for UI display only. */
+    prefix: text("prefix").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (t) => ({
+    keyHashUnique: uniqueIndex("project_api_keys_hash_unique").on(t.keyHash),
+    byProject: index("project_api_keys_project_idx").on(t.projectId),
+  })
+);
 
 export const feedback = pgTable(
   "feedback",
@@ -42,7 +94,6 @@ export const feedback = pgTable(
       .notNull()
       .default("open"),
 
-    /** Thread comments — array of { id, author, body, createdAt }. */
     thread: jsonb("thread").$type<ThreadComment[]>().notNull().default(sql`'[]'::jsonb`),
 
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

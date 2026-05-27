@@ -94,3 +94,73 @@ export interface FeedbackTransport {
   /** Upload a screenshot blob for an already-created feedback. Returns the updated record. */
   uploadScreenshot?(feedbackId: string, blob: Blob): Promise<Feedback>;
 }
+
+// ---------------- Users & projects ----------------
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+}
+
+export interface Project {
+  id: string;
+  ownerId: string;
+  /** Slug used as the projectId on every Feedback row. */
+  slug: string;
+  name: string;
+  description?: string;
+  /** Comma-separated list of origins allowed to send feedback for this project. */
+  allowedOrigins: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Project view for the dashboard, with feedback counters folded in. */
+export interface ProjectSummary extends Project {
+  totalFeedback: number;
+  openFeedback: number;
+}
+
+/** Returned exactly once when a key is created or rotated. */
+export interface ProjectApiKeyIssued {
+  id: string;
+  projectId: string;
+  /** The plaintext key. Shown only at creation; the API stores a hash. */
+  key: string;
+  createdAt: string;
+}
+
+export interface ProjectApiKeyMetadata {
+  id: string;
+  projectId: string;
+  /** First few characters of the key for UI display. The full key is never re-shown. */
+  prefix: string;
+  createdAt: string;
+  lastUsedAt?: string;
+}
+
+export interface CreateProjectInput {
+  slug: string;
+  name: string;
+  description?: string;
+  allowedOrigins?: string[];
+}
+
+export interface UpdateProjectInput {
+  name?: string;
+  description?: string;
+  allowedOrigins?: string[];
+}
+
+export interface SignupInput {
+  email: string;
+  password: string;
+  name: string;
+}
+
+export interface LoginInput {
+  email: string;
+  password: string;
+}

@@ -8,6 +8,7 @@
     "start": "bun run src/server.ts",
     "test": "vitest --run",
     "typecheck": "tsc --noEmit",
+    "migrate": "bun run scripts/migrate.ts",
     "lint": "echo 'no lint configured for api yet'"
   },
   "dependencies": {

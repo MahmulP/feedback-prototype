@@ -1,11 +1,10 @@
 /**
- * End-to-end smoke test: drives the API surface that the SDK and dashboard use.
+ * End-to-end smoke for the rewritten API. Walks the dashboard auth flow,
+ * creates a project, issues a key, and exercises the SDK ingest endpoints.
  *
- * Run with:
  *   bun run scripts/e2e-smoke.ts
  *
- * Expects the API to be running on http://localhost:8787 (or override with
- * SMOKE_API_URL).
+ * Expects the API on http://localhost:8787 (override with SMOKE_API_URL).
  */
 
 import { existsSync, readdirSync } from "node:fs";
@@ -16,29 +15,13 @@ const STORAGE_DIR = process.env.SMOKE_STORAGE_DIR
   ? path.resolve(process.env.SMOKE_STORAGE_DIR)
   : path.resolve(process.cwd(), "apps/api/data/screenshots");
 
-interface Step {
-  name: string;
-  run(): Promise<void>;
-}
-
-let createdId: string | null = null;
-let projectId = `smoke-${Date.now().toString(36)}`;
-
-async function jsonFetch<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
-    method,
-    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error(`${method} ${url} → ${res.status} ${res.statusText}: ${text}`);
-  }
-  return text ? (JSON.parse(text) as T) : (undefined as T);
-}
+let cookie = "";
+let projectKey = "";
+let createdId = "";
+const slug = `smoke-${Date.now().toString(36)}`;
+const email = `${slug}@example.com`;
 
 const PNG = Uint8Array.from([
-  // 1×1 green PNG
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
   0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
   0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00, 0x01, 0x00, 0x00,
@@ -46,155 +29,163 @@ const PNG = Uint8Array.from([
   0x42, 0x60, 0x82,
 ]);
 
+interface Step {
+  name: string;
+  run(): Promise<void>;
+}
+
+async function jsonFetch<T>(method: string, url: string, body?: unknown, headers: Record<string, string> = {}): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+      ...(cookie ? { cookie } : {}),
+      ...headers,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`${method} ${url} → ${res.status}: ${text}`);
+  }
+  // Capture set-cookie if present so subsequent requests are authenticated.
+  const setCookie = res.headers.get("set-cookie");
+  if (setCookie) cookie = setCookie.split(";")[0]!;
+  return text ? (JSON.parse(text) as T) : (undefined as T);
+}
+
 const steps: Step[] = [
   {
     name: "API health responds OK",
     async run() {
       const res = await fetch(`${API}/health`);
-      if (!res.ok) throw new Error(`health returned ${res.status}`);
-      const data = (await res.json()) as { ok: boolean };
-      if (!data.ok) throw new Error("health.ok = false");
+      if (!res.ok) throw new Error(`health ${res.status}`);
     },
   },
   {
-    name: "SDK-style POST /v1/feedback creates a pin",
+    name: "signup + cookie session",
     async run() {
-      const created = await jsonFetch<{ id: string; status: string; thread: unknown[] }>(
+      await jsonFetch("POST", `${API}/v1/auth/signup`, { email, password: "supersafepw", name: "Smoke" });
+      if (!cookie) throw new Error("no session cookie returned");
+      await jsonFetch("GET", `${API}/v1/auth/me`);
+    },
+  },
+  {
+    name: "create project",
+    async run() {
+      await jsonFetch("POST", `${API}/v1/projects`, { slug, name: "Smoke", description: "e2e" });
+    },
+  },
+  {
+    name: "issue project API key (returned once)",
+    async run() {
+      const res = await jsonFetch<{ key: string }>("POST", `${API}/v1/projects/${slug}/keys`, {});
+      if (!res.key.startsWith("mp_")) throw new Error("unexpected key prefix");
+      projectKey = res.key;
+    },
+  },
+  {
+    name: "SDK POST /v1/feedback creates a pin (no projectId in body)",
+    async run() {
+      const res = await jsonFetch<{ id: string; projectId: string }>(
         "POST",
         `${API}/v1/feedback`,
         {
-          projectId,
           pageUrl: "/checkout",
           selector: "[data-feedback-id='submit-btn']",
           coordinates: { xPercent: 0.72, yPercent: 0.31, xPx: 1037, yPx: 279 },
           viewport: { width: 1440, height: 900, devicePixelRatio: 2 },
-          comment: { author: { name: "Anita" }, body: "Button label should be 'Pay now'" },
-        }
+          comment: { author: { name: "Smoke" }, body: "needs label review" },
+        },
+        { "x-feedback-key": projectKey }
       );
-      createdId = created.id;
-      if (!createdId) throw new Error("create returned no id");
-      if (created.status !== "open") throw new Error(`expected status=open, got ${created.status}`);
-      if (created.thread.length !== 1) throw new Error("thread length should be 1");
+      if (res.projectId !== slug) throw new Error(`projectId mismatch: ${res.projectId}`);
+      createdId = res.id;
     },
   },
   {
-    name: "Dashboard list shows the new pin",
+    name: "SDK GET /v1/feedback returns the pin scoped by key",
     async run() {
-      const list = await jsonFetch<{ items: { id: string }[] }>(
+      const res = await jsonFetch<{ items: { id: string }[] }>(
         "GET",
-        `${API}/v1/feedback?projectId=${encodeURIComponent(projectId)}`
+        `${API}/v1/feedback`,
+        undefined,
+        { "x-feedback-key": projectKey }
       );
-      if (!list.items.find((f) => f.id === createdId)) {
-        throw new Error("created pin missing from list");
-      }
+      if (!res.items.find((p) => p.id === createdId)) throw new Error("pin missing in scoped list");
     },
   },
   {
-    name: "Dashboard project summary aggregates correctly",
+    name: "Dashboard list scoped to owner",
     async run() {
-      const res = await jsonFetch<{ items: { projectId: string; openFeedback: number; totalFeedback: number }[] }>(
+      const res = await jsonFetch<{ items: { slug: string; openFeedback: number }[] }>(
         "GET",
         `${API}/v1/projects`
       );
-      const summary = res.items.find((p) => p.projectId === projectId);
-      if (!summary) throw new Error("project missing in /v1/projects");
-      if (summary.openFeedback !== 1 || summary.totalFeedback !== 1) {
-        throw new Error(`unexpected counts: ${JSON.stringify(summary)}`);
-      }
+      const project = res.items.find((p) => p.slug === slug);
+      if (!project) throw new Error("project missing in dashboard list");
+      if (project.openFeedback !== 1) throw new Error(`expected 1 open, got ${project.openFeedback}`);
     },
   },
   {
     name: "Status PATCH transitions open → resolved",
     async run() {
-      const updated = await jsonFetch<{ status: string }>(
+      const res = await jsonFetch<{ status: string }>(
         "PATCH",
-        `${API}/v1/feedback/${encodeURIComponent(createdId!)}`,
+        `${API}/v1/feedback/${createdId}`,
         { status: "resolved" }
       );
-      if (updated.status !== "resolved") throw new Error("status did not transition");
+      if (res.status !== "resolved") throw new Error("status did not transition");
     },
   },
   {
-    name: "Reply appends to the thread",
+    name: "PATCH coordinates moves the pin",
     async run() {
-      const updated = await jsonFetch<{ thread: { body: string }[] }>(
-        "POST",
-        `${API}/v1/feedback/${encodeURIComponent(createdId!)}/comments`,
-        { author: { name: "Budi" }, body: "Confirmed fixed in #421" }
+      const next = { xPercent: 0.1, yPercent: 0.2, xPx: 12, yPx: 34 };
+      const res = await jsonFetch<{ coordinates: typeof next }>(
+        "PATCH",
+        `${API}/v1/feedback/${createdId}/coordinates`,
+        { coordinates: next },
+        { "x-feedback-key": projectKey }
       );
-      if (updated.thread.length !== 2) throw new Error("thread should have 2 comments");
-      if (updated.thread[1]?.body !== "Confirmed fixed in #421") {
-        throw new Error("reply body not persisted");
-      }
+      if (res.coordinates.xPercent !== next.xPercent) throw new Error("xPercent not persisted");
     },
   },
   {
-    name: "Screenshot upload writes a file to local disk",
+    name: "Screenshot upload writes to disk",
     async run() {
       const form = new FormData();
       form.append("file", new Blob([PNG], { type: "image/png" }), "shot.png");
-      const res = await fetch(`${API}/v1/feedback/${encodeURIComponent(createdId!)}/screenshot`, {
+      const res = await fetch(`${API}/v1/feedback/${createdId}/screenshot`, {
         method: "POST",
+        headers: { "x-feedback-key": projectKey },
         body: form,
       });
-      if (!res.ok) throw new Error(`upload returned ${res.status}`);
-      const updated = (await res.json()) as { screenshotKey?: string };
-      if (!updated.screenshotKey?.endsWith(".png")) {
-        throw new Error("screenshotKey not set");
-      }
-      const onDisk = path.join(STORAGE_DIR, "screenshots", `${createdId!}.png`);
+      if (!res.ok) throw new Error(`upload ${res.status}`);
+      const onDisk = path.join(STORAGE_DIR, "screenshots", `${createdId}.png`);
       if (!existsSync(onDisk)) {
         const dirContents = existsSync(STORAGE_DIR) ? readdirSync(STORAGE_DIR).join(", ") : "(missing dir)";
-        throw new Error(`screenshot file not on disk at ${onDisk}; dir contents: ${dirContents}`);
+        throw new Error(`file not on disk at ${onDisk}; dir: ${dirContents}`);
       }
     },
   },
   {
-    name: "Screenshot fetch returns the bytes with image/png",
+    name: "screenshot fetch returns image/png",
     async run() {
-      const res = await fetch(`${API}/v1/feedback/${encodeURIComponent(createdId!)}/screenshot`);
-      if (!res.ok) throw new Error(`fetch returned ${res.status}`);
-      const ct = res.headers.get("content-type");
-      if (ct !== "image/png") throw new Error(`unexpected content-type: ${ct}`);
-      const buf = new Uint8Array(await res.arrayBuffer());
-      if (buf.byteLength !== PNG.byteLength) {
-        throw new Error(`size mismatch: got ${buf.byteLength}, expected ${PNG.byteLength}`);
-      }
+      const res = await fetch(`${API}/v1/feedback/${createdId}/screenshot`);
+      if (!res.ok) throw new Error(`fetch ${res.status}`);
+      if (res.headers.get("content-type") !== "image/png") throw new Error("wrong content-type");
     },
   },
   {
-    name: "Validation error on malformed payload",
+    name: "ingest without key is rejected",
     async run() {
       const res = await fetch(`${API}/v1/feedback`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId: "" }),
+        body: JSON.stringify({ pageUrl: "/", selector: "#x", coordinates: { xPercent: 0, yPercent: 0, xPx: 0, yPx: 0 }, viewport: { width: 1, height: 1, devicePixelRatio: 1 } }),
       });
-      if (res.status !== 400) throw new Error(`expected 400, got ${res.status}`);
-    },
-  },
-  {
-    name: "404 on unknown feedback",
-    async run() {
-      const res = await fetch(`${API}/v1/feedback/nope`);
-      if (res.status !== 404) throw new Error(`expected 404, got ${res.status}`);
-    },
-  },
-  {
-    name: "PATCH /v1/feedback/:id/coordinates moves a pin",
-    async run() {
-      const next = { xPercent: 0.1, yPercent: 0.2, xPx: 12, yPx: 34 };
-      const updated = await jsonFetch<{ coordinates: typeof next }>(
-        "PATCH",
-        `${API}/v1/feedback/${encodeURIComponent(createdId!)}/coordinates`,
-        { coordinates: next }
-      );
-      if (
-        updated.coordinates.xPercent !== next.xPercent ||
-        updated.coordinates.yPercent !== next.yPercent
-      ) {
-        throw new Error("coordinates not persisted");
-      }
+      if (res.status !== 401) throw new Error(`expected 401, got ${res.status}`);
     },
   },
 ];

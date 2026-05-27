@@ -42,8 +42,10 @@ export function createMockTransport(options: MockTransportOptions = {}): Feedbac
   return {
     async list(query: ListFeedbackQuery): Promise<ListFeedbackResult> {
       await delay();
+      // When `projectId` is empty, the SDK is relying on the API to scope by
+      // key — return every record. When set, scope by it.
       const filtered = items
-        .filter((f) => f.projectId === query.projectId)
+        .filter((f) => (query.projectId ? f.projectId === query.projectId : true))
         .filter((f) => (query.pageUrl ? f.pageUrl === query.pageUrl : true))
         .filter((f) => (query.status ? f.status === query.status : true))
         .map(clone);

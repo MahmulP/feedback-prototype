@@ -26,7 +26,6 @@ export const commentInputSchema = z.object({
 });
 
 export const createFeedbackSchema = z.object({
-  projectId: z.string().min(1).max(80),
   pageUrl: z.string().min(1).max(2000),
   selector: z.string().min(1).max(2000),
   coordinates: coordinatesSchema,
@@ -35,7 +34,6 @@ export const createFeedbackSchema = z.object({
 });
 
 export const listQuerySchema = z.object({
-  projectId: z.string().min(1).max(80),
   pageUrl: z.string().max(2000).optional(),
   status: z.enum(["open", "resolved", "archived"]).optional(),
 });
@@ -46,4 +44,32 @@ export const statusUpdateSchema = z.object({
 
 export const coordinatesUpdateSchema = z.object({
   coordinates: coordinatesSchema,
+});
+
+// --- users + projects -------------------------------------------------
+
+export const signupSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(200),
+  password: z.string().min(8).max(200),
+  name: z.string().trim().min(1).max(80),
+});
+
+export const loginSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(200),
+  password: z.string().min(1).max(200),
+});
+
+const slugPattern = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
+
+export const projectCreateSchema = z.object({
+  slug: z.string().trim().regex(slugPattern, "slug must be lowercase letters, digits, and dashes"),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(1000).optional(),
+  allowedOrigins: z.array(z.string().url().max(200)).max(20).optional(),
+});
+
+export const projectUpdateSchema = z.object({
+  name: z.string().trim().min(1).max(120).optional(),
+  description: z.string().trim().max(1000).optional(),
+  allowedOrigins: z.array(z.string().url().max(200)).max(20).optional(),
 });

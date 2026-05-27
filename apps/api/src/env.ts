@@ -23,14 +23,10 @@ const schema = z.object({
     .url()
     .optional()
     .or(z.literal("").transform(() => undefined)),
-  ADMIN_API_KEY: z
+  /** HMAC secret for dashboard cookie sessions. Required in production. */
+  SESSION_SECRET: z
     .string()
-    .min(1)
-    .optional()
-    .or(z.literal("").transform(() => undefined)),
-  /** Comma-separated `projectId:key` pairs. Empty = no per-project keys. */
-  PROJECT_API_KEYS: z
-    .string()
+    .min(32)
     .optional()
     .or(z.literal("").transform(() => undefined)),
   /** Logging verbosity. */
@@ -54,7 +50,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
   return cached;
 }
 
-/** Test helper. */
 export function _resetEnvForTests() {
   cached = null;
 }

@@ -3,28 +3,33 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { setSession, verifyCredentials, authConfigured } from "@/lib/session";
+import { api, ApiError } from "@/lib/api";
+import { copySetCookieToBrowser } from "@/lib/session-bridge";
 
-const schema = z.object({
+const loginSchema = z.object({
   email: z.string().trim().email().max(200),
   password: z.string().min(1).max(200),
   next: z.string().max(200).optional(),
 });
 
-export interface LoginResult {
+const signupSchema = z.object({
+  email: z.string().trim().email().max(200),
+  password: z.string().min(8).max(200),
+  name: z.string().trim().min(1).max(80),
+  next: z.string().max(200).optional(),
+});
+
+export interface ActionResult {
   ok: boolean;
   error?: string;
 }
 
-export async function loginAction(formData: FormData): Promise<LoginResult> {
-  if (!authConfigured()) {
-    return {
-      ok: false,
-      error:
-        "Auth is not configured. Set ADMIN_EMAIL + ADMIN_PASSWORD (or ADMIN_PASSWORD_HASH) in the dashboard environment.",
-    };
-  }
-  const parsed = schema.safeParse({
+function safeNext(value: string | undefined): string {
+  return value && value.startsWith("/") && !value.startsWith("//") ? value : "/projects";
+}
+
+export async function loginAction(formData: FormData): Promise<ActionResult> {
+  const parsed = loginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
     next: formData.get("next") || undefined,
@@ -32,15 +37,58 @@ export async function loginAction(formData: FormData): Promise<LoginResult> {
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
-  if (!verifyCredentials(parsed.data.email, parsed.data.password)) {
-    return { ok: false, error: "Email or password is incorrect." };
+  let res: Response;
+  try {
+    res = await api.login({ email: parsed.data.email, password: parsed.data.password });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Network error reaching the API",
+    };
   }
-  await setSession(parsed.data.email);
-  const dest = isSafeRedirect(parsed.data.next) ? parsed.data.next : "/projects";
-  redirect(dest);
+  if (!res.ok) {
+    if (res.status === 401) return { ok: false, error: "Email or password is incorrect." };
+    return { ok: false, error: `Login failed (HTTP ${res.status}).` };
+  }
+  await copySetCookieToBrowser(res);
+  redirect(safeNext(parsed.data.next));
 }
 
-function isSafeRedirect(value: string | undefined): value is string {
-  if (!value) return false;
-  return value.startsWith("/") && !value.startsWith("//");
+export async function signupAction(formData: FormData): Promise<ActionResult> {
+  const parsed = signupSchema.safeParse({
+    email: formData.get("email"),
+    password: formData.get("password"),
+    name: formData.get("name"),
+    next: formData.get("next") || undefined,
+  });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  let res: Response;
+  try {
+    res = await api.signup({
+      email: parsed.data.email,
+      password: parsed.data.password,
+      name: parsed.data.name,
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Network error reaching the API",
+    };
+  }
+  if (!res.ok) {
+    if (res.status === 409) return { ok: false, error: "Email is already registered." };
+    if (res.status === 400) {
+      try {
+        const data = (await res.json()) as { error?: { message?: string } };
+        return { ok: false, error: data?.error?.message ?? "Invalid input." };
+      } catch {
+        return { ok: false, error: "Invalid input." };
+      }
+    }
+    return { ok: false, error: `Signup failed (HTTP ${res.status}).` };
+  }
+  await copySetCookieToBrowser(res);
+  redirect(safeNext(parsed.data.next));
 }
