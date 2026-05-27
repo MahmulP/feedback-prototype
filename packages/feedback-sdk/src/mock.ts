@@ -7,7 +7,7 @@ import type {
   FeedbackTransport,
   ListFeedbackQuery,
   ListFeedbackResult,
-} from "@mahmulp/shared-types";
+} from "./types.js";
 
 /**
  * In-memory transport for local development / demos / tests.

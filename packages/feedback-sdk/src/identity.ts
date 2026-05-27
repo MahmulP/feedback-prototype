@@ -8,7 +8,7 @@
  * a real auth integration.
  */
 
-import type { FeedbackAuthor } from "@mahmulp/shared-types";
+import type { FeedbackAuthor } from "./types.js";
 
 const STORAGE_KEY_PREFIX = "mahmulp-fb-author:";
 

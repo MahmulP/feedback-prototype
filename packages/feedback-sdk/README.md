@@ -1,84 +1,81 @@
 # @mahmulp/feedback-sdk
 
-Framework-agnostic visual feedback SDK for prototype review. Pin comments to UI elements, capture stable DOM selectors plus coordinates, and sync them to your self-hosted backend.
+[![npm](https://img.shields.io/npm/v/@mahmulp/feedback-sdk.svg)](https://www.npmjs.com/package/@mahmulp/feedback-sdk)
+[![npm bundle size](https://img.shields.io/bundlephobia/minzip/@mahmulp/feedback-sdk)](https://bundlephobia.com/package/@mahmulp/feedback-sdk)
 
-**Primary target:** Svelte / SvelteKit. Works fine in React, Vue, and plain HTML via the same core API.
+Framework-agnostic visual feedback SDK for prototype review. Reviewers pin comments to UI elements; you get back a stable DOM selector, percentage + pixel coordinates, viewport metadata, and an optional screenshot.
+
+Designed for **self-hosted** setups: pair this SDK with a backend (we ship one in the same repo) and own your data.
+
+- Floating launcher widget built in (toggle feedback mode, hide pins, hide launcher)
+- Stable DOM selectors that survive layout changes
+- Drag-to-move pins with optimistic update
+- Optional screenshot capture (via dynamically loaded `html2canvas`)
+- Svelte adapter for ergonomic SvelteKit integration
+- Works in React, Vue, and plain HTML via the same core API
 
 ## Install
 
 ```bash
-bun add @mahmulp/feedback-sdk
+npm  install @mahmulp/feedback-sdk
+bun  add     @mahmulp/feedback-sdk
+pnpm add     @mahmulp/feedback-sdk
+yarn add     @mahmulp/feedback-sdk
 ```
 
-## Svelte
+## Quick start
+
+You always need an `apiUrl` and an `apiKey`. The key tells the API which project this prototype belongs to — generate one in your dashboard's project settings.
+
+### Vanilla / React / Vue
+
+```ts
+import { initFeedback } from '@mahmulp/feedback-sdk'
+
+initFeedback({
+  apiUrl: 'https://feedback.example.com',
+  apiKey: 'mp_…',
+})
+```
+
+That's it. A floating launcher appears in the bottom-right corner.
+
+### Svelte / SvelteKit
 
 ```svelte
 <script lang="ts">
-  import { feedback, feedbackEnabled } from '@mahmulp/feedback-sdk/svelte'
-  const enabled = feedbackEnabled()
+  import { feedback } from '@mahmulp/feedback-sdk/svelte'
 </script>
 
-<div use:feedback={{ apiUrl: import.meta.env.VITE_FEEDBACK_API, projectId: 'prototype-a' }}>
+<div use:feedback={{
+  apiUrl: 'https://feedback.example.com',
+  apiKey: 'mp_…',
+}}>
   <slot />
 </div>
-
-<button on:click={() => enabled.toggle()}>
-  {$enabled ? 'Stop' : 'Start'} feedback
-</button>
 ```
 
-## React
+### Local development without a backend
 
-```tsx
-import { useEffect } from 'react'
-import { initFeedback } from '@mahmulp/feedback-sdk'
-
-useEffect(() => {
-  const ctrl = initFeedback({
-    apiUrl: import.meta.env.VITE_FEEDBACK_API,
-    projectId: 'prototype-a',
-  })
-  return () => ctrl.destroy()
-}, [])
-```
-
-## Vanilla / CDN
-
-```html
-<script src="/feedback-sdk.global.js"></script>
-<script>
-  const ctrl = FeedbackSDK.initFeedback({
-    apiUrl: '/api',
-    projectId: 'prototype-a',
-  })
-  document.querySelector('#toggle').addEventListener('click', () => {
-    ctrl.setEnabled(!ctrl.isEnabled())
-  })
-</script>
-```
-
-## Local development without a backend
-
-The package ships a tiny in-memory transport for use before the API exists:
+For demos, e2e tests, or styling work — use the in-memory mock transport:
 
 ```ts
 import { initFeedback } from '@mahmulp/feedback-sdk'
 import { createMockTransport } from '@mahmulp/feedback-sdk/mock'
 
-const transport = createMockTransport()
-const ctrl = initFeedback({ projectId: 'demo', transport })
+initFeedback({ transport: createMockTransport() })
 ```
 
-## Interaction model
+## What it does
 
-When feedback mode is enabled:
+When the user enters feedback mode (via the launcher or `setEnabled(true)`):
 
-- **Hover** outlines the element under the cursor.
-- **Click** picks it as the pin target and creates a pin.
-- **Alt-click** walks one level up the DOM tree (modifier configurable via `selectParentModifier`).
-- **Escape** cancels selection.
+- **Hover** any element → outline highlight + tag/class HUD.
+- **Click** → composer popover (name, email, comment, optional screenshot).
+- **Alt-click** → walks one parent up so you can pin a coarser element.
+- **Esc** → cancel.
 
-Pins survive layout changes by storing both a stable DOM selector (preferring `data-feedback-id`) and percentage-based coordinates. When the selector no longer resolves, the pin is rendered as **orphaned** at its original page-pixel coordinate.
+Existing pins are rendered as draggable markers. Click a pin to open its thread, reply, or change status. Drop a `data-feedback-id="some-key"` attribute on important elements to make their selectors human-readable and refactor-proof.
 
 ## Public API
 
@@ -90,6 +87,7 @@ import {
   resolveSelector,
   findElement,
   createHttpTransport,
+  captureViewport,
 } from '@mahmulp/feedback-sdk'
 ```
 
@@ -101,4 +99,12 @@ import { feedback, feedbackEnabled } from '@mahmulp/feedback-sdk/svelte'
 import { createMockTransport } from '@mahmulp/feedback-sdk/mock'
 ```
 
-See the [conventions](../../.kiro/steering/sdk-conventions.md) for the rules the SDK plays by.
+The full set of options is documented in `InitFeedbackOptions` (TypeScript types ship with the package).
+
+## Self-host the backend
+
+The SDK pairs with a small self-hostable backend (Hono on Bun + PostgreSQL or in-memory store) that lives in the same monorepo: <https://github.com/MahmulP/feedback-prototype>. The dashboard there manages users, projects, and per-project API keys.
+
+## License
+
+MIT © Mahmul Pratama

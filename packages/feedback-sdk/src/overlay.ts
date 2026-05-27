@@ -1,4 +1,4 @@
-import type { Feedback } from "@mahmulp/shared-types";
+import type { Feedback } from "./types.js";
 import { findElement } from "./selector.js";
 import { projectCoordinates } from "./coordinates.js";
 import { LauncherManager, type LauncherCallbacks } from "./launcher.js";
