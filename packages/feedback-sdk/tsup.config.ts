@@ -10,11 +10,11 @@ export default defineConfig([
     clean: true,
     target: "es2020",
     treeshake: true,
-    // html2canvas is loaded via dynamic import only when a pin is created.
+    // html2canvas-pro is loaded via dynamic import only when a pin is created.
     // Keep it out of every static bundle — ESM splits it into its own chunk,
     // CJS/IIFE consumers either bundle their own (CJS) or ship the bundled
     // version baked in (IIFE — see below).
-    external: ["html2canvas"],
+    external: ["html2canvas-pro"],
   },
   // Mock transport: ESM + CJS + types
   {
@@ -35,7 +35,7 @@ export default defineConfig([
     clean: false,
     target: "es2020",
     treeshake: true,
-    external: ["svelte", "svelte/store", "html2canvas"],
+    external: ["svelte", "svelte/store", "html2canvas-pro"],
   },
   // CDN / IIFE bundle (single self-contained file, html2canvas inlined)
   {

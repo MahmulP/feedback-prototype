@@ -1,9 +1,14 @@
 /**
  * Optional screenshot capture for new pins.
  *
- * `html2canvas` is **dynamically imported** so prototypes that never create
+ * `html2canvas-pro` is **dynamically imported** so prototypes that never create
  * a pin don't pay for it. Capture is best-effort: any failure logs and
  * resolves to null rather than blocking pin creation.
+ *
+ * We use `html2canvas-pro` (a maintained fork of `html2canvas`) instead of the
+ * original because it understands modern CSS color spaces (`oklch`, `lab`,
+ * `color-mix`, etc.) that ship with Tailwind v4 / shadcn / modern design
+ * systems. The original errors out on these and the capture silently fails.
  */
 
 const HOST_ATTR = "data-mahmulp-feedback-host";
@@ -56,7 +61,13 @@ export async function captureViewport(options: CaptureOptions = {}): Promise<Blo
     });
 
     return await canvasToBlob(canvas, opts.mimeType, opts.quality);
-  } catch {
+  } catch (err) {
+    // Surface the failure so debugging "no screenshot captured" doesn't
+    // require opening the SDK source. Capture is still best-effort: we
+    // resolve null so pin creation can proceed.
+    if (typeof console !== "undefined") {
+      console.warn("[feedback-sdk] screenshot capture failed:", err);
+    }
     return null;
   } finally {
     if (host) host.style.visibility = previousVisibility;
@@ -70,16 +81,18 @@ async function loadHtml2Canvas(): Promise<Html2CanvasFn | null> {
   if (html2canvasPromise) return html2canvasPromise;
   html2canvasPromise = (async () => {
     try {
-      const mod = (await import("html2canvas")) as { default?: Html2CanvasFn } & Html2CanvasFn;
+      const mod = (await import("html2canvas-pro")) as unknown as {
+        default?: Html2CanvasFn;
+      } & Html2CanvasFn;
       return (mod.default ?? (mod as unknown as Html2CanvasFn)) ?? null;
     } catch (err) {
       if (!html2canvasMissingWarned && typeof console !== "undefined") {
         html2canvasMissingWarned = true;
-        // html2canvas is bundled with the SDK — if the dynamic import still
-        // fails, something is wrong with the consumer's bundler config.
+        // html2canvas-pro is bundled with the SDK — if the dynamic import
+        // still fails, something is wrong with the consumer's bundler config.
         console.warn(
-          "[feedback-sdk] screenshot capture disabled: failed to load `html2canvas`. " +
-            "This shouldn't normally happen — html2canvas is a direct dependency of the SDK. " +
+          "[feedback-sdk] screenshot capture disabled: failed to load `html2canvas-pro`. " +
+            "This shouldn't normally happen — html2canvas-pro is a direct dependency of the SDK. " +
             "Pass `captureScreenshots: false` to silence this warning if intended.",
           err
         );
