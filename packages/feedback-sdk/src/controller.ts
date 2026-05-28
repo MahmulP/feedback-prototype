@@ -248,8 +248,10 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
     overlay.hideHud();
 
     // Kick off screenshot capture in the background while the user types.
-    // We hide the overlay's host inside captureViewport, so it never appears
-    // in the resulting image even though the popover renders during typing.
+    // captureViewport() excludes the SDK overlay host via html2canvas's
+    // `ignoreElements` so the composer popover and launcher never appear in
+    // the resulting image — and importantly, no part of our chrome blinks
+    // visually while the rasterization runs.
     let screenshotPromise: Promise<Blob | null> | null = null;
     if (wantsScreenshots) {
       screenshotPromise = captureFn().catch(() => null);
