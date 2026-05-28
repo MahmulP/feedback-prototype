@@ -65,6 +65,16 @@ Edit `src/routes/+layout.svelte`. Ada dua cara: pakai **Svelte action** (recomme
 
 Itu doang. Floating launcher otomatis muncul di pojok kanan-bawah. User klik **Feedback** → klik elemen apapun → tulis komen → kirim.
 
+> **Nonaktifkan screenshot capture (opsional):** kalau prototype-mu pakai animasi/transition yang sensitif, atau prefer pin tanpa screenshot, tambahkan `captureScreenshots: false`:
+>
+> ```svelte
+> <div use:feedback={{ apiUrl, apiKey, captureScreenshots: false }}>
+>   <slot />
+> </div>
+> ```
+>
+> html2canvas raster jalan sinkron di main thread dan bisa overlap dengan animasi composer; matikan kalau lebih penting smooth daripada visual context.
+
 ### Cara B — Init manual (kalau butuh kontrol lebih)
 
 ```svelte
