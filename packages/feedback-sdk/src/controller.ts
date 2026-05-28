@@ -454,7 +454,10 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
   const wantsLauncher = options.showLauncher !== false;
   const launcherState = {
     pinsVisible: options.pinsVisible !== false,
-    launcherVisible: true,
+    // Default to a collapsed launcher. The user reveals it by clicking the
+    // small bubble button in the bottom-right corner. This keeps the SDK's
+    // visual footprint near zero on first paint of the prototype.
+    launcherVisible: false,
   };
   overlay.setPinsVisible(launcherState.pinsVisible);
 

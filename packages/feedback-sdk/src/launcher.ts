@@ -28,7 +28,10 @@ export class LauncherManager {
   private state: LauncherState = {
     enabled: false,
     pinsVisible: true,
-    launcherVisible: true,
+    // Start collapsed — only the small reveal bubble is visible until the
+    // user clicks it. Less visual weight on the prototype out of the box;
+    // user opts in by clicking the bubble icon in the bottom-right.
+    launcherVisible: false,
   };
 
   constructor(parent: ShadowRoot, callbacks: LauncherCallbacks) {
