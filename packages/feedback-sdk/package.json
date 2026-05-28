@@ -52,21 +52,19 @@
     "prepublishOnly": "bun run typecheck && bun run test && bun run build"
   },
   "peerDependencies": {
-    "svelte": "^4.0.0 || ^5.0.0",
-    "html2canvas": "^1.4.1"
+    "svelte": "^4.0.0 || ^5.0.0"
   },
   "peerDependenciesMeta": {
     "svelte": {
       "optional": true
-    },
-    "html2canvas": {
-      "optional": true
     }
+  },
+  "dependencies": {
+    "html2canvas": "^1.4.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "happy-dom": "^15.11.0",
-    "html2canvas": "^1.4.1",
     "svelte": "^5.0.0",
     "tsup": "^8.3.5",
     "typescript": "^5.6.3",

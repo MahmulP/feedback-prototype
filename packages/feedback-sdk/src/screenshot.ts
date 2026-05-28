@@ -64,6 +64,7 @@ export async function captureViewport(options: CaptureOptions = {}): Promise<Blo
 }
 
 let html2canvasPromise: Promise<Html2CanvasFn | null> | null = null;
+let html2canvasMissingWarned = false;
 
 async function loadHtml2Canvas(): Promise<Html2CanvasFn | null> {
   if (html2canvasPromise) return html2canvasPromise;
@@ -71,7 +72,18 @@ async function loadHtml2Canvas(): Promise<Html2CanvasFn | null> {
     try {
       const mod = (await import("html2canvas")) as { default?: Html2CanvasFn } & Html2CanvasFn;
       return (mod.default ?? (mod as unknown as Html2CanvasFn)) ?? null;
-    } catch {
+    } catch (err) {
+      if (!html2canvasMissingWarned && typeof console !== "undefined") {
+        html2canvasMissingWarned = true;
+        // html2canvas is bundled with the SDK — if the dynamic import still
+        // fails, something is wrong with the consumer's bundler config.
+        console.warn(
+          "[feedback-sdk] screenshot capture disabled: failed to load `html2canvas`. " +
+            "This shouldn't normally happen — html2canvas is a direct dependency of the SDK. " +
+            "Pass `captureScreenshots: false` to silence this warning if intended.",
+          err
+        );
+      }
       return null;
     }
   })();
@@ -112,4 +124,5 @@ type Html2CanvasFn = (
 /** @internal â€” exposed for tests. */
 export function _resetForTests() {
   html2canvasPromise = null;
+  html2canvasMissingWarned = false;
 }
