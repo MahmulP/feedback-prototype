@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+type Html2CanvasMock = (
+  root?: Element | HTMLElement,
+  options?: Record<string, unknown>
+) => Promise<HTMLCanvasElement>;
+
 const html2canvasMock = vi.hoisted(() =>
-  vi.fn(async () => {
+  vi.fn<Html2CanvasMock>(async () => {
     const canvas = document.createElement("canvas");
     canvas.width = 4;
     canvas.height = 4;
@@ -39,7 +44,7 @@ describe("captureViewport", () => {
 
     let visibilityDuringCapture: string | null = null;
     let ignoreFn: ((el: Element) => boolean) | null = null;
-    html2canvasMock.mockImplementationOnce(async (_root, options: Record<string, unknown> = {}) => {
+    html2canvasMock.mockImplementationOnce(async (_root, options = {}) => {
       visibilityDuringCapture = host.style.visibility;
       ignoreFn = options.ignoreElements as (el: Element) => boolean;
       const canvas = document.createElement("canvas");
