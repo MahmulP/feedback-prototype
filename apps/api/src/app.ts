@@ -291,6 +291,9 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   });
 
   // SDK list — scoped by the project key. Lets the SDK render existing pins.
+  // Archived items are filtered out by default so old/dismissed pins don't
+  // keep rendering on the prototype. The dashboard endpoints don't pass
+  // this flag, so reviewers can still see and manage archived items.
   app.get("/v1/feedback", requireProjectKey, async (c) => {
     const bag = c.var.auth;
     const parsed = listQuerySchema.safeParse({
@@ -298,7 +301,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
       status: c.req.query("status") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
-    const items = await deps.store.list({ projectId: bag.scopedProjectId!, ...parsed.data });
+    const items = await deps.store.list({
+      projectId: bag.scopedProjectId!,
+      excludeArchived: true,
+      ...parsed.data,
+    });
     return c.json({ items });
   });
 

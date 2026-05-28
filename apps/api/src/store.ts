@@ -244,6 +244,12 @@ export function createInMemoryStore(): FeedbackStore {
       const filtered = all
         .filter((f) => (query.pageUrl ? f.pageUrl === query.pageUrl : true))
         .filter((f) => (query.status ? f.status === query.status : true))
+        // SDK clients pass `excludeArchived: true` so old archived pins
+        // don't keep rendering on the prototype. An explicit `status` filter
+        // wins (caller can still ask for archived items by name).
+        .filter((f) =>
+          query.excludeArchived && !query.status ? f.status !== "archived" : true
+        )
         .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
       return filtered.map(clone);
     },
