@@ -532,33 +532,85 @@ export class Overlay {
   }
 
   private layoutPins() {
-    const next = document.createDocumentFragment();
+    // Diff-based rendering: keep existing pin DOM nodes whenever possible
+    // so that interactive state (focus, pointer capture, drag listeners)
+    // doesn't get blown away mid-interaction. Rebuilding via
+    // `replaceChildren` on every state change caused the "blink + reopen"
+    // flicker users saw when replying / changing status.
+    const existing = new Map<string, HTMLButtonElement>();
+    for (const node of Array.from(this.pinLayer.children) as HTMLButtonElement[]) {
+      const id = node.dataset.feedbackId;
+      if (id) existing.set(id, node);
+    }
+
+    const desiredOrder: HTMLButtonElement[] = [];
+    const seen = new Set<string>();
+
     for (const fb of this.pendingFeedback) {
+      seen.add(fb.id);
       const target = findElement(fb.selector);
       const projected = projectCoordinates(target, fb.coordinates);
-      const pin = document.createElement("button");
-      pin.type = "button";
-      const classes = ["pin"];
-      if (projected.orphaned) classes.push("orphaned");
-      if (fb.status === "resolved") classes.push("resolved");
-      if (fb.status === "archived") classes.push("archived");
-      pin.className = classes.join(" ");
-      pin.setAttribute("data-feedback-id", fb.id);
-      pin.setAttribute("aria-label", `Feedback ${fb.id}`);
-      pin.style.left = `${projected.x - window.scrollX}px`;
-      pin.style.top = `${projected.y - window.scrollY}px`;
-      const label = document.createElement("span");
-      label.textContent = String(fb.thread.length || 1);
-      pin.appendChild(label);
-      pin.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (this.draggingPin === fb.id) return; // suppress click after a drag
-        this.onPinClick?.(fb);
-      });
-      this.attachDragHandlers(pin, fb);
-      next.appendChild(pin);
+      const left = `${projected.x - window.scrollX}px`;
+      const top = `${projected.y - window.scrollY}px`;
+
+      let pin = existing.get(fb.id);
+      if (pin) {
+        // Update an existing node in place.
+        const classes = ["pin"];
+        if (projected.orphaned) classes.push("orphaned");
+        if (fb.status === "resolved") classes.push("resolved");
+        if (fb.status === "archived") classes.push("archived");
+        // Preserve the "dragging" class if a drag is in flight for this pin.
+        if (pin.classList.contains("dragging")) classes.push("dragging");
+        pin.className = classes.join(" ");
+        if (pin.style.left !== left) pin.style.left = left;
+        if (pin.style.top !== top) pin.style.top = top;
+        const label = pin.firstElementChild as HTMLSpanElement | null;
+        const nextLabel = String(fb.thread.length || 1);
+        if (label && label.textContent !== nextLabel) label.textContent = nextLabel;
+      } else {
+        // Brand-new pin: build it from scratch.
+        pin = document.createElement("button");
+        pin.type = "button";
+        const classes = ["pin"];
+        if (projected.orphaned) classes.push("orphaned");
+        if (fb.status === "resolved") classes.push("resolved");
+        if (fb.status === "archived") classes.push("archived");
+        pin.className = classes.join(" ");
+        pin.dataset.feedbackId = fb.id;
+        pin.setAttribute("aria-label", `Feedback ${fb.id}`);
+        pin.style.left = left;
+        pin.style.top = top;
+        const label = document.createElement("span");
+        label.textContent = String(fb.thread.length || 1);
+        pin.appendChild(label);
+        pin.addEventListener("click", (e) => {
+          e.stopPropagation();
+          // Resolve the click against the *current* pendingFeedback list so
+          // updates to status/thread length are reflected on click instead
+          // of the stale closure value captured at first render.
+          if (this.draggingPin === fb.id) return;
+          const fresh = this.pendingFeedback.find((f) => f.id === fb.id) ?? fb;
+          this.onPinClick?.(fresh);
+        });
+        this.attachDragHandlers(pin, fb);
+      }
+      desiredOrder.push(pin);
     }
-    this.pinLayer.replaceChildren(next);
+
+    // Remove pins that no longer exist in the feedback list.
+    for (const [id, node] of existing) {
+      if (!seen.has(id)) node.remove();
+    }
+
+    // Make sure DOM order matches desired order. We compare child-by-child
+    // and only insert when needed; this keeps the DOM stable for nodes that
+    // didn't move.
+    for (let i = 0; i < desiredOrder.length; i++) {
+      const want = desiredOrder[i]!;
+      const have = this.pinLayer.children[i] as HTMLElement | undefined;
+      if (have !== want) this.pinLayer.insertBefore(want, have ?? null);
+    }
   }
 
   destroy() {

@@ -36,6 +36,9 @@ interface OpenState {
   el: HTMLDivElement;
   pageX: number;
   pageY: number;
+  /** For thread popovers, the feedback id this popover renders. Used to
+   *  decide whether a re-render can swap content in place vs. close+reopen. */
+  feedbackId?: string;
 }
 
 export class PopoverManager {
@@ -76,11 +79,38 @@ export class PopoverManager {
     return el;
   }
 
+  /** True when a thread for this feedback is already open. */
+  isThreadOpenFor(feedbackId: string): boolean {
+    return this.current?.type === "thread" && this.current.feedbackId === feedbackId;
+  }
+
   showThread(feedback: Feedback, anchor: PopoverAnchor, cb: ThreadCallbacks): HTMLDivElement {
+    // If we're already showing this exact thread, swap the content in place
+    // instead of remove+rebuild. This is what kills the "blink" the user sees
+    // when replying / changing status (which trigger a re-open under the hood).
+    if (this.current?.type === "thread" && this.current.feedbackId === feedback.id) {
+      const fresh = this.buildThread(feedback, cb);
+      this.current.el.replaceWith(fresh);
+      this.current = {
+        type: "thread",
+        el: fresh,
+        pageX: anchor.pageX,
+        pageY: anchor.pageY,
+        feedbackId: feedback.id,
+      };
+      this.repositionInternal();
+      return fresh;
+    }
     this.hide();
     const el = this.buildThread(feedback, cb);
     this.layer.appendChild(el);
-    this.current = { type: "thread", el, pageX: anchor.pageX, pageY: anchor.pageY };
+    this.current = {
+      type: "thread",
+      el,
+      pageX: anchor.pageX,
+      pageY: anchor.pageY,
+      feedbackId: feedback.id,
+    };
     this.repositionInternal();
     return el;
   }

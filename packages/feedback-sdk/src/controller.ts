@@ -303,9 +303,9 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
           const updated = await transport.reply(fb.id, { author, body });
           setAuthor(author);
           replaceFeedback(updated);
-          // Re-render the thread with the new comment.
-          overlay.popoverManager().hide();
-          activeThreadId = null;
+          // Re-render the thread with the new comment. The popover manager
+          // detects we're already showing this feedback and swaps content
+          // in place instead of close + reopen, so there's no flicker.
           openThread(updated);
         } catch (err) {
           reportError(err);
@@ -315,8 +315,6 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
         try {
           const updated = await transport.setStatus(fb.id, status);
           replaceFeedback(updated);
-          overlay.popoverManager().hide();
-          activeThreadId = null;
           openThread(updated);
         } catch (err) {
           reportError(err);
