@@ -41,9 +41,13 @@ export async function captureViewport(options: CaptureOptions = {}): Promise<Blo
   const html2canvas = await loadHtml2Canvas();
   if (!html2canvas) return null;
 
+  // We exclude the SDK overlay host from the rasterized output via the
+  // `ignoreElements` callback rather than toggling `visibility: hidden` on
+  // it, because mutating visibility briefly hides the composer popover and
+  // floating launcher mid-capture, which the user perceives as a glitchy
+  // "everything blinks for a moment" right after clicking a target. Letting
+  // html2canvas walk past those nodes is invisible to the user.
   const host = document.querySelector(`[${HOST_ATTR}]`) as HTMLElement | null;
-  const previousVisibility = host?.style.visibility ?? "";
-  if (host) host.style.visibility = "hidden";
 
   try {
     const canvas: HTMLCanvasElement = await html2canvas(document.documentElement, {
@@ -58,6 +62,14 @@ export async function captureViewport(options: CaptureOptions = {}): Promise<Blo
       logging: false,
       useCORS: true,
       allowTaint: false,
+      ignoreElements: (el: Element) => {
+        // Skip the SDK host (and anything inside it).
+        if (host && (el === host || host.contains(el))) return true;
+        // Defensive: also skip any element marked with the host attribute,
+        // even if `host` lookup happened to fail.
+        if (el instanceof HTMLElement && el.hasAttribute(HOST_ATTR)) return true;
+        return false;
+      },
     });
 
     return await canvasToBlob(canvas, opts.mimeType, opts.quality);
@@ -69,8 +81,6 @@ export async function captureViewport(options: CaptureOptions = {}): Promise<Blo
       console.warn("[feedback-sdk] screenshot capture failed:", err);
     }
     return null;
-  } finally {
-    if (host) host.style.visibility = previousVisibility;
   }
 }
 
