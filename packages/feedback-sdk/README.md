@@ -11,7 +11,7 @@ Designed for **self-hosted** setups: pair this SDK with a backend (we ship one i
 - Floating launcher widget built in (toggle feedback mode, hide pins, hide launcher)
 - Stable DOM selectors that survive layout changes
 - Drag-to-move pins with optimistic update
-- Screenshot capture via dynamically loaded `html2canvas` (bundled as a direct dependency)
+- Screenshot capture via dynamically loaded `html2canvas-pro` (bundled as a direct dependency)
 - Svelte adapter for ergonomic SvelteKit integration
 - Works in React, Vue, and plain HTML via the same core API
 

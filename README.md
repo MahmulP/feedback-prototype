@@ -49,7 +49,7 @@ pnpm add @mahmulp/feedback-sdk
 yarn add @mahmulp/feedback-sdk
 ```
 
-Screenshot capture works out of the box — `html2canvas` ships as a direct dependency and is loaded on demand the first time a pin is created.
+Screenshot capture works out of the box — `html2canvas-pro` ships as a direct dependency and is loaded on demand the first time a pin is created. We use the `-pro` fork because it understands modern CSS color spaces (`oklch`, `lab`, `color-mix`) used by Tailwind v4 and most modern design systems; the original `html2canvas` errors out on those.
 
 ### Get an API key
 
@@ -357,7 +357,7 @@ The dashboard couldn't reach `FEEDBACK_API_URL`. Make sure the API process is ru
 
 ### Screenshots don't show in the dashboard
 
-- The SDK option `captureScreenshots` defaults to `true` in production HTTP mode. `html2canvas` ships as a direct dependency, so a missing-import warning here usually means a bundler is mis-handling dynamic imports — open an issue with the bundler version.
+- The SDK option `captureScreenshots` defaults to `true` in production HTTP mode. `html2canvas-pro` ships as a direct dependency, so a missing-import warning here usually means a bundler is mis-handling dynamic imports — open an issue with the bundler version.
 - Check the `STORAGE_DIR` on the API host — files are saved as `screenshots/{feedbackId}.{png|jpg|webp}`.
 
 ---

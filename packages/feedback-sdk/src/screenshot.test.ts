@@ -9,7 +9,7 @@ const html2canvasMock = vi.hoisted(() =>
   })
 );
 
-vi.mock("html2canvas", () => ({ default: html2canvasMock }));
+vi.mock("html2canvas-pro", () => ({ default: html2canvasMock }));
 
 import { _resetForTests, captureViewport } from "./screenshot.js";
 
