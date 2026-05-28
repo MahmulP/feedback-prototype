@@ -49,11 +49,7 @@ pnpm add @mahmulp/feedback-sdk
 yarn add @mahmulp/feedback-sdk
 ```
 
-Optional peer for screenshot capture:
-
-```bash
-bun add html2canvas
-```
+Screenshot capture works out of the box — `html2canvas` ships as a direct dependency and is loaded on demand the first time a pin is created.
 
 ### Get an API key
 
@@ -361,7 +357,7 @@ The dashboard couldn't reach `FEEDBACK_API_URL`. Make sure the API process is ru
 
 ### Screenshots don't show in the dashboard
 
-- The SDK option `captureScreenshots` defaults to `true` in production HTTP mode. Confirm `html2canvas` is installable in the prototype's bundler (some older bundlers need a polyfill for canvas APIs).
+- The SDK option `captureScreenshots` defaults to `true` in production HTTP mode. `html2canvas` ships as a direct dependency, so a missing-import warning here usually means a bundler is mis-handling dynamic imports — open an issue with the bundler version.
 - Check the `STORAGE_DIR` on the API host — files are saved as `screenshots/{feedbackId}.{png|jpg|webp}`.
 
 ---

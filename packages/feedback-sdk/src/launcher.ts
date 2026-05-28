@@ -93,7 +93,11 @@ export class LauncherManager {
   /** True when an event originated from the launcher's own UI. */
   ownsNode(node: EventTarget | Element | null): boolean {
     if (!node) return false;
-    return this.launcherEl.contains(node as Node) || this.revealEl.contains(node as Node);
+    // composedPath() can include `Window`, `Document`, and shadow roots — none
+    // of which are valid arguments to `Node.contains`. Guard with `instanceof`
+    // so we never throw `parameter 1 is not of type 'Node'`.
+    if (typeof Node === "undefined" || !(node instanceof Node)) return false;
+    return this.launcherEl.contains(node) || this.revealEl.contains(node);
   }
 
   destroy(): void {

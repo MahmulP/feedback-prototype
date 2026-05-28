@@ -10,7 +10,7 @@
     },
     "apps/api": {
       "name": "@mahmulp/api",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "dependencies": {
         "@hono/node-server": "^1.13.7",
         "@mahmulp/shared-types": "workspace:*",
@@ -28,7 +28,7 @@
     },
     "apps/dashboard": {
       "name": "@mahmulp/dashboard",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "dependencies": {
         "@mahmulp/feedback-sdk": "workspace:*",
         "@mahmulp/shared-types": "workspace:*",
@@ -62,25 +62,22 @@
     },
     "packages/feedback-sdk": {
       "name": "@mahmulp/feedback-sdk",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "dependencies": {
-        "@mahmulp/shared-types": "workspace:*",
+        "html2canvas": "^1.4.1",
       },
       "devDependencies": {
         "@types/node": "^20.0.0",
         "happy-dom": "^15.11.0",
-        "html2canvas": "^1.4.1",
         "svelte": "^5.0.0",
         "tsup": "^8.3.5",
         "typescript": "^5.6.3",
         "vitest": "^2.1.5",
       },
       "peerDependencies": {
-        "html2canvas": "^1.4.1",
         "svelte": "^4.0.0 || ^5.0.0",
       },
       "optionalPeers": [
-        "html2canvas",
         "svelte",
       ],
     },
@@ -103,7 +100,7 @@
     },
     "packages/shared-types": {
       "name": "@mahmulp/shared-types",
-      "version": "0.1.0",
+      "version": "0.0.1",
       "devDependencies": {
         "typescript": "^5.6.3",
       },
