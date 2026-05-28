@@ -375,9 +375,11 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
 
   async function refresh(): Promise<void> {
     try {
-      // The transport's list() filters server-side by the API key's project,
-      // so we just pass an empty query and trust the response.
-      const result = await transport.list({ projectId: "" });
+      // Scope the list to the current page so SPA prototypes only render
+      // pins relevant to the route the user is on. Without this, pins from
+      // /dashboard would render on /dashboard/inventory and friends.
+      const pageUrl = getPageUrl();
+      const result = await transport.list({ projectId: "", pageUrl });
       state.feedbacks = result.items;
       overlay.renderPins(state.feedbacks, openThread, onPinDragEnd);
     } catch (err) {
@@ -417,6 +419,33 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
   document.addEventListener("keydown", onKeyDown, true);
   window.addEventListener("scroll", onWindowReposition, true);
   window.addEventListener("resize", onWindowReposition);
+
+  // Refresh on SPA navigation. SvelteKit / Next.js / React Router all use
+  // history.pushState + replaceState under the hood and emit a `popstate`
+  // event for back/forward, but no native event for programmatic navigation.
+  // We monkey-patch both methods to dispatch a synthetic event so we can
+  // listen uniformly. This is scoped to the SDK's lifetime and reverted in
+  // destroy().
+  let lastSeenUrl = getPageUrl();
+  function onMaybeNavigate(): void {
+    const next = getPageUrl();
+    if (next === lastSeenUrl) return;
+    lastSeenUrl = next;
+    void refresh();
+  }
+  const originalPushState = history.pushState.bind(history);
+  const originalReplaceState = history.replaceState.bind(history);
+  history.pushState = function patchedPushState(...args) {
+    const result = originalPushState(...args);
+    queueMicrotask(onMaybeNavigate);
+    return result;
+  };
+  history.replaceState = function patchedReplaceState(...args) {
+    const result = originalReplaceState(...args);
+    queueMicrotask(onMaybeNavigate);
+    return result;
+  };
+  window.addEventListener("popstate", onMaybeNavigate);
 
   void refresh();
   overlay.setEnabledStyles(state.enabled);
@@ -488,6 +517,11 @@ export function initFeedback(options: InitFeedbackOptions): FeedbackController {
       document.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("scroll", onWindowReposition, true);
       window.removeEventListener("resize", onWindowReposition);
+      window.removeEventListener("popstate", onMaybeNavigate);
+      // Restore the original history methods so the prototype isn't left
+      // with our monkey-patched versions if the SDK is torn down.
+      history.pushState = originalPushState;
+      history.replaceState = originalReplaceState;
       overlay.destroy();
     },
   };
