@@ -74,6 +74,13 @@ export interface ListFeedbackQuery {
   projectId: string;
   pageUrl?: string;
   status?: FeedbackStatus;
+  /**
+   * When true, archived items are filtered out unless an explicit `status`
+   * filter overrides it. Useful for SDK-side rendering where archived pins
+   * shouldn't appear on the prototype anymore. Dashboards typically leave
+   * this false so reviewers can manage archived items.
+   */
+  excludeArchived?: boolean;
 }
 
 export interface ListFeedbackResult {
