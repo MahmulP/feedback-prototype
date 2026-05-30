@@ -286,3 +286,87 @@ describe("dashboard reads", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("email notifications", () => {
+  interface Captured {
+    kind: "new" | "reply";
+    feedbackId: string;
+  }
+
+  function buildAppWithNotifier(captured: Captured[]) {
+    const storage = new LocalDiskDriver({ rootDir: tempDir });
+    return createApp({
+      env: {
+        NODE_ENV: "test",
+        PORT: 0,
+        STORAGE_DIR: tempDir,
+        ALLOWED_ORIGINS: ["*"],
+        LOG_LEVEL: "error",
+        RATE_LIMIT_INGEST_PER_MIN: 60,
+        DATABASE_URL: undefined,
+        SESSION_SECRET: "test-secret-32-bytes-long-keep-shh!",
+      } as Parameters<typeof createApp>[0]["env"],
+      store: createInMemoryStore(),
+      storage,
+      notifier: {
+        notifyNewFeedback: (fb) => captured.push({ kind: "new", feedbackId: fb.id }),
+        notifyNewReply: (fb) => captured.push({ kind: "reply", feedbackId: fb.id }),
+      },
+    });
+  }
+
+  it("fires notifyNewFeedback on SDK feedback creation and notifyNewReply on a reply", async () => {
+    const captured: Captured[] = [];
+    const localApp = buildAppWithNotifier(captured);
+
+    // signup + project + key, all against the local app instance.
+    const signupRes = await localApp.fetch(
+      new Request("http://test.local/v1/auth/signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "owner@example.com", password: "hunter2pw", name: "owner" }),
+      })
+    );
+    const cookie = (signupRes.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
+
+    await localApp.fetch(
+      new Request("http://test.local/v1/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ slug: "gamma", name: "gamma" }),
+      })
+    );
+    const keyRes = await localApp.fetch(
+      new Request("http://test.local/v1/projects/gamma/keys", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: "{}",
+      })
+    );
+    const { key } = (await keyRes.json()) as { key: string };
+
+    const created = await localApp.fetch(
+      new Request("http://test.local/v1/feedback", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-feedback-key": key },
+        body: JSON.stringify({ ...baseFeedback, comment: { author: { name: "Tester" }, body: "hi" } }),
+      })
+    );
+    const fb = (await created.json()) as { id: string };
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toEqual({ kind: "new", feedbackId: fb.id });
+
+    // Owner replies via the dashboard session.
+    await localApp.fetch(
+      new Request(`http://test.local/v1/feedback/${fb.id}/comments`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ author: { name: "owner" }, body: "thanks!" }),
+      })
+    );
+
+    expect(captured).toHaveLength(2);
+    expect(captured[1]).toEqual({ kind: "reply", feedbackId: fb.id });
+  });
+});

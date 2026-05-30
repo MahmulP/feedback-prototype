@@ -27,6 +27,8 @@ import {
 import { sessionClearHeader, sessionCookieHeader, signSession } from "./session.js";
 import { detectImageMime, LocalDiskDriver, type StorageDriver } from "./storage.js";
 import { createInMemoryStore, type FeedbackStore } from "./store.js";
+import { createMailer } from "./mailer.js";
+import { createNotifier, NoopNotifier, type Notifier } from "./notifications.js";
 
 const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 
@@ -35,11 +37,13 @@ export interface AppDeps {
   store: FeedbackStore;
   storage: StorageDriver;
   logger?: Logger;
+  notifier?: Notifier;
 }
 
 export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
   const app = new Hono<{ Variables: AppVariables }>();
   const logger = deps.logger ?? createLogger(deps.env);
+  const notifier = deps.notifier ?? new NoopNotifier();
 
   app.use("/*", loggingMiddleware(logger));
 
@@ -273,6 +277,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
     const updated = await deps.store.reply(id, parsed.data);
     if (!updated) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    notifier.notifyNewReply(updated, parsed.data);
     return c.json(updated);
   });
 
@@ -287,6 +292,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
       projectId: bag.scopedProjectId!,
       ...parsed.data,
     });
+    notifier.notifyNewFeedback(created);
     return c.json(created, 201);
   });
 
@@ -399,6 +405,7 @@ function validation(c: { json: (body: unknown, status: number) => Response }, me
 export async function createAppFromEnv(env: ApiEnv): Promise<Hono<{ Variables: AppVariables }>> {
   const storage = new LocalDiskDriver({ rootDir: env.STORAGE_DIR });
   await storage.ensureRoot();
+  const logger = createLogger(env);
   let store: FeedbackStore;
   if (env.DATABASE_URL) {
     const { createDb } = await import("./db/client.js");
@@ -410,5 +417,7 @@ export async function createAppFromEnv(env: ApiEnv): Promise<Hono<{ Variables: A
     store = createInMemoryStore();
     console.log("[api] using in-memory store (set DATABASE_URL to persist)");
   }
-  return createApp({ env, store, storage });
+  const mailer = createMailer(env, logger);
+  const notifier = createNotifier({ env, store, mailer, logger });
+  return createApp({ env, store, storage, logger, notifier });
 }
