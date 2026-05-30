@@ -52,6 +52,37 @@ ALLOWED_ORIGINS=https://prototype.example.com,https://feedback.example.com
 DATABASE_URL=postgres://feedback:secret@localhost:5432/feedback
 ```
 
+#### Email notifications (optional)
+
+When configured, the API emails a project's **owner** whenever new feedback or
+a reply arrives, so they don't have to poll the dashboard. Notifications are
+**off** unless both `SMTP_HOST` and `SMTP_FROM` are set — the API runs fine
+without them.
+
+```bash
+# Example: a typical authenticated SMTP relay (Resend, Mailgun, SES, Gmail...)
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=587            # 587 = STARTTLS, 465 = implicit TLS
+SMTP_SECURE=false        # "true" only for port 465
+SMTP_USER=resend
+SMTP_PASS=<your smtp password / app password>
+SMTP_FROM=Feedback <noreply@iwkapps.com>
+
+# Used to build "view in dashboard" links inside the emails.
+DASHBOARD_URL=https://prototype.iwkapps.com
+```
+
+Email sending is **fire-and-forget**: if the SMTP server is unreachable, the
+failure is logged and the feedback/reply request still succeeds. It never
+blocks the SDK ingest path.
+
+**Anti-spam / quota protection.** Activity is *coalesced per project*: the first
+event opens a window (`EMAIL_DIGEST_WINDOW_SEC`, default 120s) and every event
+during that window is batched into a single digest email. A burst of 30 form
+submissions in two minutes becomes one email, not 30. A per-project hourly cap
+(`EMAIL_MAX_PER_HOUR`, default 20) is a hard backstop. This keeps you well under
+a typical 1000-emails/day SMTP limit even under spammy traffic.
+
 Apply the schema once:
 
 ```bash
