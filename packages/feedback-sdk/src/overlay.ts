@@ -78,8 +78,20 @@ const OVERLAY_STYLES = `
 .pin:hover { transform: rotate(-45deg) scale(1.08); }
 .pin > span { transform: rotate(45deg); }
 .pin.orphaned { opacity: 0.55; filter: grayscale(0.4); }
-.pin.resolved { background: #2F7A4D; }
-.pin.archived { background: #6B7280; }
+/* Status colors — kept clearly distinct so reviewers can tell at a glance
+   which pins are still active vs. dealt with:
+     open      → brand green (needs attention)
+     resolved  → blue with a lighter border (done)
+     archived  → muted grey, faded back (dismissed) */
+.pin.resolved {
+  background: #2563EB;
+  border-color: #DBEAFE;
+}
+.pin.archived {
+  background: #9CA3AF;
+  border-color: #E5E7EB;
+  opacity: 0.5;
+}
 .pin.dragging { cursor: grabbing; transform: rotate(-45deg) scale(1.18); }
 
 .pinLayer.hidden { display: none; }

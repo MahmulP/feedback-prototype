@@ -14,6 +14,7 @@ import { createLogger, loggingMiddleware, type Logger } from "./logger.js";
 import { hashPassword, verifyPassword } from "./password.js";
 import { rateLimit } from "./rate-limit.js";
 import {
+  addMemberSchema,
   commentInputSchema,
   coordinatesUpdateSchema,
   createFeedbackSchema,
@@ -126,7 +127,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   // -------------------- Projects (dashboard) --------------------
   app.get("/v1/projects", requireUser, async (c) => {
-    const items = await deps.store.listProjectsForOwner(currentUser(c).id);
+    const items = await deps.store.listProjectsForUser(currentUser(c).id);
     return c.json({ items });
   });
 
@@ -151,11 +152,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   app.get("/v1/projects/:slug", requireUser, async (c) => {
     const slug = c.req.param("slug");
-    const project = await deps.store.getProject(slug);
-    if (!project || project.ownerId !== currentUser(c).id) {
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) {
       return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
     }
-    return c.json(project);
+    return c.json({ ...access.project, role: access.role });
   });
 
   app.patch("/v1/projects/:slug", requireUser, async (c) => {
@@ -164,6 +165,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     if (body == null) return validation(c, "invalid JSON body");
     const parsed = projectUpdateSchema.safeParse(body);
     if (!parsed.success) return validation(c, parsed.error.message);
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    if (access.role !== "owner") {
+      return c.json({ error: { code: "forbidden", message: "only the owner can edit this project" } }, 403);
+    }
     const updated = await deps.store.updateProject(slug, currentUser(c).id, parsed.data);
     if (!updated) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
     return c.json(updated);
@@ -171,8 +177,68 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
 
   app.delete("/v1/projects/:slug", requireUser, async (c) => {
     const slug = c.req.param("slug");
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    if (access.role !== "owner") {
+      return c.json({ error: { code: "forbidden", message: "only the owner can delete this project" } }, 403);
+    }
     const ok = await deps.store.deleteProject(slug, currentUser(c).id);
     if (!ok) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    return c.json({ ok: true });
+  });
+
+  // -------------------- Project members (sharing, owner-managed) --------------------
+  app.get("/v1/projects/:slug/members", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    const items = await deps.store.listProjectMembers(access.project.id);
+    return c.json({ items });
+  });
+
+  app.post("/v1/projects/:slug/members", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const body = await safeJson(c);
+    if (body == null) return validation(c, "invalid JSON body");
+    const parsed = addMemberSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    if (access.role !== "owner") {
+      return c.json({ error: { code: "forbidden", message: "only the owner can share this project" } }, 403);
+    }
+    const target = await deps.store.getUserByEmail(parsed.data.email);
+    if (!target) {
+      return c.json({ error: { code: "user_not_found", message: "no registered user with that email" } }, 404);
+    }
+    if (target.user.id === access.project.ownerId) {
+      return c.json({ error: { code: "cannot_add_owner", message: "the owner already has full access" } }, 409);
+    }
+    try {
+      const member = await deps.store.addProjectMember(
+        access.project.id,
+        { id: target.user.id, email: target.user.email, name: target.user.name },
+        parsed.data.role
+      );
+      return c.json(member, 201);
+    } catch (err) {
+      if ((err as Error).message === "already_member") {
+        return c.json({ error: { code: "already_member", message: "user already has access" } }, 409);
+      }
+      throw err;
+    }
+  });
+
+  app.delete("/v1/projects/:slug/members/:memberId", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const memberId = c.req.param("memberId");
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    if (access.role !== "owner") {
+      return c.json({ error: { code: "forbidden", message: "only the owner can manage sharing" } }, 403);
+    }
+    const ok = await deps.store.removeProjectMember(memberId, access.project.id);
+    if (!ok) return c.json({ error: { code: "member_not_found", message: "no such member" } }, 404);
     return c.json({ ok: true });
   });
 
@@ -214,11 +280,11 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     return c.json({ ok: true });
   });
 
-  // -------------------- Feedback (dashboard reads, owner-scoped) --------------------
+  // -------------------- Feedback (dashboard reads, owner or member) --------------------
   app.get("/v1/projects/:slug/feedback", requireUser, async (c) => {
     const slug = c.req.param("slug");
-    const project = await deps.store.getProject(slug);
-    if (!project || project.ownerId !== currentUser(c).id) {
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) {
       return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
     }
     const parsed = listQuerySchema.safeParse({
@@ -226,7 +292,7 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
       status: c.req.query("status") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
-    const items = await deps.store.list({ projectId: project.slug, ...parsed.data });
+    const items = await deps.store.list({ projectId: access.project.slug, ...parsed.data });
     return c.json({ items });
   });
 
@@ -234,14 +300,22 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     const id = c.req.param("id");
     const fb = await deps.store.get(id);
     if (!fb) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
-    const project = await deps.store.getProject(fb.projectId);
-    if (!project || project.ownerId !== currentUser(c).id) {
+    const access = await deps.store.getProjectForUser(fb.projectId, currentUser(c).id);
+    if (!access) {
       return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
     }
     return c.json(fb);
   });
 
-  app.patch("/v1/feedback/:id", requireUser, async (c) => {
+  // Status transitions. Accepts a dashboard owner/editor session OR a matching
+  // project key (so the SDK's Resolve/Archive buttons work). Viewers and
+  // non-matching keys are rejected.
+  app.patch("/v1/feedback/:id", async (c) => {
+    const bag = c.var.auth;
+    // Reject up-front when the request carries no credentials at all.
+    if (!bag?.user && !bag?.scopedProjectId) {
+      return c.json({ error: { code: "unauthorized", message: "login or project key required" } }, 401);
+    }
     const id = c.req.param("id");
     const body = await safeJson(c);
     if (body == null) return validation(c, "invalid JSON body");
@@ -250,9 +324,18 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     const fb = await deps.store.get(id);
     if (!fb) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
     const project = await deps.store.getProject(fb.projectId);
-    if (!project || project.ownerId !== currentUser(c).id) {
-      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    if (!project) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+
+    let allowed = bag.scopedProjectId === project.slug;
+    if (!allowed && bag.user) {
+      const access = await deps.store.getProjectForUser(project.slug, bag.user.id);
+      // Owners and editors can triage; viewers cannot.
+      allowed = !!access && access.role !== "viewer";
     }
+    if (!allowed) {
+      return c.json({ error: { code: "forbidden", message: "not allowed to change this feedback" } }, 403);
+    }
+
     const updated = await deps.store.setStatus(id, parsed.data.status);
     if (!updated) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
     return c.json(updated);
@@ -271,9 +354,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     if (!project) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
 
     const bag = c.var.auth;
-    const isOwner = bag?.user?.id === project.ownerId;
     const isProjectKey = bag?.scopedProjectId === project.slug;
-    if (!isOwner && !isProjectKey) return c.json({ error: { code: "unauthorized", message: "login or project key required" } }, 401);
+    let isAllowedUser = false;
+    if (bag?.user) {
+      const access = await deps.store.getProjectForUser(project.slug, bag.user.id);
+      // Owners and editors can reply; viewers are read-only.
+      isAllowedUser = !!access && access.role !== "viewer";
+    }
+    if (!isAllowedUser && !isProjectKey) {
+      return c.json({ error: { code: "unauthorized", message: "login or project key required" } }, 401);
+    }
 
     const updated = await deps.store.reply(id, parsed.data);
     if (!updated) return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);

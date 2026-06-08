@@ -8,7 +8,10 @@ import type {
   ListFeedbackQuery,
   Project,
   ProjectApiKeyMetadata,
+  ProjectMember,
+  ProjectRole,
   ProjectSummary,
+  SharedRole,
   UpdateProjectInput,
   User,
 } from "@mahmulp/shared-types";
@@ -29,9 +32,23 @@ export interface FeedbackStore {
   // --- projects (owner-scoped)
   createProject(ownerId: string, input: CreateProjectInput): Promise<Project>;
   getProject(slug: string): Promise<Project | null>;
-  listProjectsForOwner(ownerId: string): Promise<ProjectSummary[]>;
+  /** Projects the user can see: owned (role "owner") + shared (role "member"). */
+  listProjectsForUser(userId: string): Promise<ProjectSummary[]>;
+  /** Resolve a project + the user's role, or null when the user has no access. */
+  getProjectForUser(slug: string, userId: string): Promise<{ project: Project; role: ProjectRole } | null>;
   updateProject(slug: string, ownerId: string, input: UpdateProjectInput): Promise<Project | null>;
   deleteProject(slug: string, ownerId: string): Promise<boolean>;
+
+  // --- project members (sharing)
+  /** Share a project with an existing user at a given role. Throws "already_member" on duplicate. */
+  addProjectMember(
+    projectId: string,
+    user: { id: string; email: string; name: string },
+    role: SharedRole
+  ): Promise<ProjectMember>;
+  listProjectMembers(projectId: string): Promise<ProjectMember[]>;
+  removeProjectMember(memberId: string, projectId: string): Promise<boolean>;
+  getMembership(projectId: string, userId: string): Promise<ProjectMember | null>;
 
   // --- project api keys
   createProjectApiKey(
@@ -65,12 +82,15 @@ interface StoredApiKey extends ProjectApiKeyMetadata {
   keyHash: string;
 }
 
+interface StoredMember extends ProjectMember {}
+
 export function createInMemoryStore(): FeedbackStore {
   const users = new Map<string, StoredUser>();
   const usersByEmail = new Map<string, string>();
   const projects = new Map<string, StoredProject>();
   const apiKeys = new Map<string, StoredApiKey>();
   const apiKeysByHash = new Map<string, string>();
+  const members = new Map<string, StoredMember>();
   const feedbackItems = new Map<string, Feedback>();
 
   function clone<T>(value: T): T {
@@ -147,10 +167,18 @@ export function createInMemoryStore(): FeedbackStore {
       return p ? clone(p) : null;
     },
 
-    async listProjectsForOwner(ownerId) {
-      const summaries: ProjectSummary[] = [];
+    async listProjectsForUser(userId) {
+      const accessible: { project: StoredProject; role: ProjectRole }[] = [];
       for (const project of projects.values()) {
-        if (project.ownerId !== ownerId) continue;
+        if (project.ownerId === userId) accessible.push({ project, role: "owner" });
+      }
+      for (const member of members.values()) {
+        if (member.userId !== userId) continue;
+        const project = [...projects.values()].find((p) => p.id === member.projectId);
+        if (project && project.ownerId !== userId) accessible.push({ project, role: member.role });
+      }
+      const summaries: ProjectSummary[] = [];
+      for (const { project, role } of accessible) {
         let total = 0;
         let open = 0;
         for (const fb of feedbackItems.values()) {
@@ -158,9 +186,21 @@ export function createInMemoryStore(): FeedbackStore {
           total += 1;
           if (fb.status === "open") open += 1;
         }
-        summaries.push({ ...clone(project), totalFeedback: total, openFeedback: open });
+        summaries.push({ ...clone(project), totalFeedback: total, openFeedback: open, role });
       }
       return summaries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    },
+
+    async getProjectForUser(slug, userId) {
+      const project = projects.get(slug.toLowerCase());
+      if (!project) return null;
+      if (project.ownerId === userId) return { project: clone(project), role: "owner" };
+      for (const member of members.values()) {
+        if (member.projectId === project.id && member.userId === userId) {
+          return { project: clone(project), role: member.role };
+        }
+      }
+      return null;
     },
 
     async updateProject(slug, ownerId, input) {
@@ -187,7 +227,52 @@ export function createInMemoryStore(): FeedbackStore {
       for (const [id, fb] of feedbackItems) {
         if (fb.projectId === project.slug) feedbackItems.delete(id);
       }
+      for (const [id, member] of members) {
+        if (member.projectId === project.id) members.delete(id);
+      }
       return true;
+    },
+
+    // --- project members (sharing) ----------------------------------
+    async addProjectMember(projectId, user, role) {
+      for (const existing of members.values()) {
+        if (existing.projectId === projectId && existing.userId === user.id) {
+          throw new Error("already_member");
+        }
+      }
+      const member: StoredMember = {
+        id: generateId("pm"),
+        projectId,
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        role,
+        createdAt: nowIso(),
+      };
+      members.set(member.id, member);
+      return clone(member);
+    },
+
+    async listProjectMembers(projectId) {
+      const list: ProjectMember[] = [];
+      for (const member of members.values()) {
+        if (member.projectId === projectId) list.push(clone(member));
+      }
+      return list.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+    },
+
+    async removeProjectMember(memberId, projectId) {
+      const member = members.get(memberId);
+      if (!member || member.projectId !== projectId) return false;
+      members.delete(memberId);
+      return true;
+    },
+
+    async getMembership(projectId, userId) {
+      for (const member of members.values()) {
+        if (member.projectId === projectId && member.userId === userId) return clone(member);
+      }
+      return null;
     },
 
     // --- project api keys -------------------------------------------

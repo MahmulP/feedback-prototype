@@ -48,8 +48,9 @@ Hidup-update progress untuk seluruh proyek. Centang berarti sudah selesai dan te
 - [x] SDK ingest (`POST /v1/feedback`) — projectId derived from key, body has none
 - [x] SDK list (`GET /v1/feedback`) — scoped by key
 - [x] PATCH coordinates (drag-to-move, project-key scoped)
-- [x] Status transitions (`PATCH /v1/feedback/:id`, owner-only)
-- [x] Comment thread reply (owner OR project key)
+- [x] Status transitions (`PATCH /v1/feedback/:id`, owner/editor **or** matching project key — fixes SDK Resolve/Archive)
+- [x] Comment thread reply (owner/editor OR project key; viewers read-only)
+- [x] **Project sharing** — `project_members` table, `editor`/`viewer` roles, member CRUD routes (`/v1/projects/:slug/members`), access via `getProjectForUser` / `listProjectsForUser`
 - [x] Local filesystem storage with path-traversal & MIME guards
 - [x] Per-key rate limit on ingest endpoints
 - [x] Structured JSON logging
@@ -57,7 +58,7 @@ Hidup-update progress untuk seluruh proyek. Centang berarti sudah selesai dan te
 - [x] Argon2id (Bun) password hashing with PBKDF2 fallback (Node test runner)
 - [x] In-memory store (default for local dev)
 - [x] **Drizzle / PostgreSQL store** (auto-switch when `DATABASE_URL` is set)
-- [x] Drizzle schema + 2 migrations (`drizzle/0000_initial.sql`, `0001_users_projects.sql`)
+- [x] Drizzle schema + 3 migrations (`drizzle/0000_initial.sql`, `0001_users_projects.sql`, `0002_project_members.sql`)
 - [x] Migration runner (`bun --filter @mahmulp/api migrate`) with `_drizzle_migrations` ledger
 - [x] Tests: 25 (env + storage + 13 route tests covering signup, projects, ingest, scoping)
 
@@ -74,12 +75,13 @@ Hidup-update progress untuk seluruh proyek. Centang berarti sudah selesai dan te
 - [x] Login + signup form (toggle), session bridge (set-cookie diteruskan ke browser)
 - [x] Logout server action
 - [x] Sidebar layout (`app/(dashboard)/layout.tsx`) + Sidebar component dengan project list, badges open count, link API keys + Settings, sign-out
-- [ ] Project list page (`/projects`) — needs rewrite untuk scope per-owner + tombol "New project"
-- [ ] New-project page (`/projects/new`) — form create project
-- [ ] Project settings page (`/projects/[slug]/settings`) — edit name/description/origins, delete project
-- [ ] API keys page (`/projects/[slug]/keys`) — list, issue (modal one-shot), revoke
-- [ ] Feedback list page — needs migration from `[projectId]` to `[slug]`
-- [ ] Feedback detail page — needs migration from `[projectId]` to `[slug]` and update API client calls
+- [x] Project list page (`/projects`) — per-owner scope + shared projects with role badges + "New project"
+- [x] New-project page (`/projects/new`) — form create project
+- [x] Project settings page (`/projects/[slug]/settings`) — edit name/description/origins, delete project, **sharing/members management (owner-only)**
+- [x] API keys page (`/projects/[slug]/keys`) — list, issue (modal one-shot), revoke
+- [x] Feedback list page — `[slug]`-scoped, members included
+- [x] Feedback detail page — `[slug]`-scoped, triage UI gated for viewers
+- [x] **SDK marker colors** — resolved (blue) / archived (faded grey) now visually distinct from open (green)
 
 ## End-to-end
 

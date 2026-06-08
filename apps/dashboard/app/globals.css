@@ -37,35 +37,11 @@
   --radius: 0.5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.10 0.02 155);
-    --foreground: oklch(0.95 0.01 150);
-    --card: oklch(0.13 0.02 155);
-    --card-foreground: oklch(0.95 0.01 150);
-    --popover: oklch(0.13 0.02 155);
-    --popover-foreground: oklch(0.95 0.01 150);
-
-    --primary: oklch(0.55 0.11 155);
-    --primary-foreground: oklch(0.10 0.02 155);
-
-    --secondary: oklch(0.18 0.03 155);
-    --secondary-foreground: oklch(0.95 0.01 150);
-
-    --muted: oklch(0.18 0.03 155);
-    --muted-foreground: oklch(0.70 0.02 155);
-
-    --accent: oklch(0.25 0.05 155);
-    --accent-foreground: oklch(0.95 0.02 150);
-
-    --destructive: oklch(0.45 0.18 25);
-    --destructive-foreground: oklch(0.98 0.01 25);
-
-    --border: oklch(0.22 0.03 155);
-    --input: oklch(0.22 0.03 155);
-    --ring: oklch(0.55 0.11 155);
-  }
-}
+/*
+ * Light theme only — dark mode was intentionally removed (it rendered too
+ * dark and hurt readability). We pin `color-scheme: light` so native UI
+ * (form controls, scrollbars) doesn't auto-darken on OS dark mode either.
+ */
 
 @theme inline {
   --color-background: var(--background);
@@ -90,6 +66,10 @@
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);
   --radius-sm: calc(var(--radius) - 4px);
+}
+
+:root {
+  color-scheme: light;
 }
 
 * {

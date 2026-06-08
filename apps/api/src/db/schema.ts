@@ -17,6 +17,7 @@ import {
  *   - users            ← dashboard accounts
  *   - projects         ← per-user projects, identified by slug
  *   - project_api_keys ← per-project ingest keys (hashed; SDK uses these)
+ *   - project_members  ← users a project has been shared with (collaborators)
  *   - feedback         ← pins, references project by slug for SDK ergonomics
  */
 
@@ -53,8 +54,7 @@ export const projects = pgTable(
   })
 );
 
-export const projectApiKeys = pgTable(
-  "project_api_keys",
+export const projectApiKeys = pgTable(  "project_api_keys",
   {
     id: text("id").primaryKey(),
     projectId: text("project_id").notNull(),
@@ -68,6 +68,28 @@ export const projectApiKeys = pgTable(
   (t) => ({
     keyHashUnique: uniqueIndex("project_api_keys_hash_unique").on(t.keyHash),
     byProject: index("project_api_keys_project_idx").on(t.projectId),
+  })
+);
+
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    userId: text("user_id").notNull(),
+    /** Denormalized from the user for display. */
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    /** Shared collaborators are "editor" or "viewer"; owner is implicit. */
+    role: text("role", { enum: ["owner", "editor", "viewer"] })
+      .notNull()
+      .default("viewer"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    memberUnique: uniqueIndex("project_members_unique").on(t.projectId, t.userId),
+    byProject: index("project_members_project_idx").on(t.projectId),
+    byUser: index("project_members_user_idx").on(t.userId),
   })
 );
 

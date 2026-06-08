@@ -17,7 +17,8 @@ export default async function ProjectsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Your projects</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Each project gets its own SDK API key. Only you can see feedback for projects you own.
+            Each project gets its own SDK API key. Projects you own and projects shared with you
+            both show up here.
           </p>
         </div>
         <Button asChild>
@@ -67,7 +68,19 @@ initFeedback({
                   </span>
                 </div>
                 <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{project.totalFeedback} total</span>
+                  <span className="flex items-center gap-2">
+                    <span>{project.totalFeedback} total</span>
+                    <span
+                      className={[
+                        "rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                        project.role === "owner"
+                          ? "bg-primary/10 text-primary"
+                          : "bg-muted text-muted-foreground",
+                      ].join(" ")}
+                    >
+                      {project.role}
+                    </span>
+                  </span>
                   <ArrowRight className="size-4" aria-hidden />
                 </div>
               </Link>

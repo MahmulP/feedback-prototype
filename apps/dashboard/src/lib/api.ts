@@ -6,7 +6,10 @@ import type {
   Project,
   ProjectApiKeyMetadata,
   ProjectApiKeyIssued,
+  ProjectMember,
   ProjectSummary,
+  ProjectWithRole,
+  SharedRole,
   User,
 } from "@mahmulp/shared-types";
 import { serverEnv } from "./env";
@@ -130,9 +133,9 @@ export const api = {
   }): Promise<Project> {
     return request<Project>("/v1/projects", { method: "POST", body: input });
   },
-  async getProject(slug: string): Promise<Project | null> {
+  async getProject(slug: string): Promise<ProjectWithRole | null> {
     try {
-      return await request<Project>(`/v1/projects/${encodeURIComponent(slug)}`);
+      return await request<ProjectWithRole>(`/v1/projects/${encodeURIComponent(slug)}`);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) return null;
       throw err;
@@ -164,6 +167,23 @@ export const api = {
   async deleteProjectKey(slug: string, keyId: string): Promise<void> {
     await request<{ ok: true }>(
       `/v1/projects/${encodeURIComponent(slug)}/keys/${encodeURIComponent(keyId)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  // --- project members (sharing)
+  async listProjectMembers(slug: string): Promise<{ items: ProjectMember[] }> {
+    return request<{ items: ProjectMember[] }>(`/v1/projects/${encodeURIComponent(slug)}/members`);
+  },
+  async addProjectMember(slug: string, input: { email: string; role: SharedRole }): Promise<ProjectMember> {
+    return request<ProjectMember>(`/v1/projects/${encodeURIComponent(slug)}/members`, {
+      method: "POST",
+      body: input,
+    });
+  },
+  async removeProjectMember(slug: string, memberId: string): Promise<void> {
+    await request<{ ok: true }>(
+      `/v1/projects/${encodeURIComponent(slug)}/members/${encodeURIComponent(memberId)}`,
       { method: "DELETE" }
     );
   },

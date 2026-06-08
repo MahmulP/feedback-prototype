@@ -73,3 +73,8 @@ export const projectUpdateSchema = z.object({
   description: z.string().trim().max(1000).optional(),
   allowedOrigins: z.array(z.string().url().max(200)).max(20).optional(),
 });
+
+export const addMemberSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(200),
+  role: z.enum(["editor", "viewer"]).default("viewer"),
+});

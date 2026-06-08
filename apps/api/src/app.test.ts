@@ -287,6 +287,158 @@ describe("dashboard reads", () => {
   });
 });
 
+describe("project sharing", () => {
+  async function shareProject(
+    owner: SessionContext,
+    slug: string,
+    email: string,
+    role: "editor" | "viewer"
+  ) {
+    return postJson(
+      `/v1/projects/${slug}/members`,
+      { email, role },
+      { headers: { cookie: owner.cookie } }
+    );
+  }
+
+  it("owner shares a project; member sees it in their project list with role", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const bob = await signup("bob@example.com");
+
+    const res = await shareProject(alice, "alpha", "bob@example.com", "editor");
+    expect(res.status).toBe(201);
+
+    const list = await app.fetch(
+      new Request("http://test.local/v1/projects", { headers: { cookie: bob.cookie } })
+    );
+    const body = (await list.json()) as { items: { slug: string; role: string }[] };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]).toMatchObject({ slug: "alpha", role: "editor" });
+  });
+
+  it("rejects sharing with an unregistered email", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const res = await shareProject(alice, "alpha", "ghost@example.com", "viewer");
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("user_not_found");
+  });
+
+  it("rejects duplicate share and non-owner sharing", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const bob = await signup("bob@example.com");
+    await shareProject(alice, "alpha", "bob@example.com", "viewer");
+
+    const dup = await shareProject(alice, "alpha", "bob@example.com", "viewer");
+    expect(dup.status).toBe(409);
+
+    // Bob (a viewer) cannot share the project further.
+    await signup("carol@example.com");
+    const bobShares = await shareProject(bob, "alpha", "carol@example.com", "viewer");
+    expect(bobShares.status).toBe(403);
+  });
+
+  it("editor can change status; viewer cannot", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const key = await issueKey(alice, "alpha");
+    const created = await postJson("/v1/feedback", baseFeedback, {
+      headers: { "x-feedback-key": key },
+    });
+    const fb = (await created.json()) as { id: string };
+
+    const editor = await signup("editor@example.com");
+    const viewer = await signup("viewer@example.com");
+    await shareProject(alice, "alpha", "editor@example.com", "editor");
+    await shareProject(alice, "alpha", "viewer@example.com", "viewer");
+
+    const editorPatch = await app.fetch(
+      new Request(`http://test.local/v1/feedback/${fb.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: editor.cookie },
+        body: JSON.stringify({ status: "resolved" }),
+      })
+    );
+    expect(editorPatch.status).toBe(200);
+
+    const viewerPatch = await app.fetch(
+      new Request(`http://test.local/v1/feedback/${fb.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", cookie: viewer.cookie },
+        body: JSON.stringify({ status: "archived" }),
+      })
+    );
+    expect(viewerPatch.status).toBe(403);
+  });
+
+  it("removing a member revokes their access", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const bob = await signup("bob@example.com");
+    const share = await shareProject(alice, "alpha", "bob@example.com", "viewer");
+    const member = (await share.json()) as { id: string };
+
+    const del = await app.fetch(
+      new Request(`http://test.local/v1/projects/alpha/members/${member.id}`, {
+        method: "DELETE",
+        headers: { cookie: alice.cookie },
+      })
+    );
+    expect(del.status).toBe(200);
+
+    const read = await app.fetch(
+      new Request("http://test.local/v1/projects/alpha", { headers: { cookie: bob.cookie } })
+    );
+    expect(read.status).toBe(404);
+  });
+});
+
+describe("SDK status transitions via project key", () => {
+  it("lets a project key resolve and archive feedback", async () => {
+    const session = await signup();
+    await createProject(session, "alpha");
+    const key = await issueKey(session, "alpha");
+    const created = await postJson("/v1/feedback", baseFeedback, {
+      headers: { "x-feedback-key": key },
+    });
+    const fb = (await created.json()) as { id: string };
+
+    const resolved = await app.fetch(
+      new Request(`http://test.local/v1/feedback/${fb.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-feedback-key": key },
+        body: JSON.stringify({ status: "resolved" }),
+      })
+    );
+    expect(resolved.status).toBe(200);
+    expect(((await resolved.json()) as { status: string }).status).toBe("resolved");
+  });
+
+  it("rejects a project key changing status on another project's feedback", async () => {
+    const session = await signup();
+    await createProject(session, "alpha");
+    await createProject(session, "beta");
+    const alphaKey = await issueKey(session, "alpha");
+    const betaKey = await issueKey(session, "beta");
+    const created = await postJson("/v1/feedback", baseFeedback, {
+      headers: { "x-feedback-key": alphaKey },
+    });
+    const fb = (await created.json()) as { id: string };
+
+    const res = await app.fetch(
+      new Request(`http://test.local/v1/feedback/${fb.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-feedback-key": betaKey },
+        body: JSON.stringify({ status: "resolved" }),
+      })
+    );
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("email notifications", () => {
   interface Captured {
     kind: "new" | "reply";

@@ -62,3 +62,49 @@ export async function deleteProjectAction(slug: string): Promise<UpdateProjectRe
   }
   redirect("/projects");
 }
+
+const addMemberSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Enter a valid email"),
+  role: z.enum(["editor", "viewer"]).default("viewer"),
+});
+
+export interface MemberResult {
+  ok: boolean;
+  error?: string;
+}
+
+export async function addMemberAction(slug: string, formData: FormData): Promise<MemberResult> {
+  const parsed = addMemberSchema.safeParse({
+    email: formData.get("email"),
+    role: formData.get("role") ?? "viewer",
+  });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  try {
+    await api.addProjectMember(slug, parsed.data);
+    revalidatePath(`/projects/${encodeURIComponent(slug)}/settings`);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ApiError) {
+      if (err.code === "user_not_found") {
+        return { ok: false, error: "No registered user with that email. They need an account first." };
+      }
+      if (err.code === "already_member") return { ok: false, error: "That user already has access." };
+      if (err.code === "cannot_add_owner") return { ok: false, error: "You already own this project." };
+      return { ok: false, error: err.message };
+    }
+    return { ok: false, error: err instanceof Error ? err.message : "Failed" };
+  }
+}
+
+export async function removeMemberAction(slug: string, memberId: string): Promise<MemberResult> {
+  try {
+    await api.removeProjectMember(slug, memberId);
+    revalidatePath(`/projects/${encodeURIComponent(slug)}/settings`);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: err.message };
+    return { ok: false, error: err instanceof Error ? err.message : "Failed" };
+  }
+}

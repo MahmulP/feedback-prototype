@@ -5,7 +5,10 @@ import type {
   FeedbackStatus,
   Project,
   ProjectApiKeyMetadata,
+  ProjectMember,
+  ProjectRole,
   ProjectSummary,
+  SharedRole,
   User,
 } from "@mahmulp/shared-types";
 
@@ -14,6 +17,7 @@ import type { DrizzleDb } from "./client.js";
 import {
   feedback as feedbackTable,
   projectApiKeys as keyTable,
+  projectMembers as memberTable,
   projects as projectsTable,
   type ThreadComment,
   users as usersTable,
@@ -59,8 +63,19 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
     };
   }
 
-  function rowToFeedback(row: typeof feedbackTable.$inferSelect): Feedback {
+  function rowToMember(row: typeof memberTable.$inferSelect): ProjectMember {
     return {
+      id: row.id,
+      projectId: row.projectId,
+      userId: row.userId,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  function rowToFeedback(row: typeof feedbackTable.$inferSelect): Feedback {    return {
       id: row.id,
       projectId: row.projectId,
       pageUrl: row.pageUrl,
@@ -153,21 +168,58 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       return row ? rowToProject(row) : null;
     },
 
-    async listProjectsForOwner(ownerId) {
-      const rows = await db
-        .select({
-          project: projectsTable,
-          totalFeedback: sql<number>`(select count(*) from ${feedbackTable} where ${feedbackTable.projectId} = ${projectsTable.slug})`,
-          openFeedback: sql<number>`(select count(*) from ${feedbackTable} where ${feedbackTable.projectId} = ${projectsTable.slug} and ${feedbackTable.status} = 'open')`,
-        })
+    async listProjectsForUser(userId) {
+      const countCols = {
+        totalFeedback: sql<number>`(select count(*) from ${feedbackTable} where ${feedbackTable.projectId} = ${projectsTable.slug})`,
+        openFeedback: sql<number>`(select count(*) from ${feedbackTable} where ${feedbackTable.projectId} = ${projectsTable.slug} and ${feedbackTable.status} = 'open')`,
+      };
+
+      const owned = await db
+        .select({ project: projectsTable, ...countCols })
         .from(projectsTable)
-        .where(eq(projectsTable.ownerId, ownerId))
+        .where(eq(projectsTable.ownerId, userId))
         .orderBy(desc(projectsTable.createdAt));
-      return rows.map((r): ProjectSummary => ({
-        ...rowToProject(r.project),
-        totalFeedback: Number(r.totalFeedback),
-        openFeedback: Number(r.openFeedback),
-      }));
+
+      const shared = await db
+        .select({ project: projectsTable, role: memberTable.role, ...countCols })
+        .from(memberTable)
+        .innerJoin(projectsTable, eq(projectsTable.id, memberTable.projectId))
+        .where(and(eq(memberTable.userId, userId), ne(projectsTable.ownerId, userId)))
+        .orderBy(desc(projectsTable.createdAt));
+
+      const summaries: ProjectSummary[] = [
+        ...owned.map((r): ProjectSummary => ({
+          ...rowToProject(r.project),
+          totalFeedback: Number(r.totalFeedback),
+          openFeedback: Number(r.openFeedback),
+          role: "owner",
+        })),
+        ...shared.map((r): ProjectSummary => ({
+          ...rowToProject(r.project),
+          totalFeedback: Number(r.totalFeedback),
+          openFeedback: Number(r.openFeedback),
+          role: r.role,
+        })),
+      ];
+      return summaries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    },
+
+    async getProjectForUser(slug, userId) {
+      const [row] = await db
+        .select()
+        .from(projectsTable)
+        .where(eq(projectsTable.slug, slug.toLowerCase()))
+        .limit(1);
+      if (!row) return null;
+      const project = rowToProject(row);
+      if (project.ownerId === userId) return { project, role: "owner" };
+      const [member] = await db
+        .select()
+        .from(memberTable)
+        .where(and(eq(memberTable.projectId, project.id), eq(memberTable.userId, userId)))
+        .limit(1);
+      if (!member) return null;
+      return { project, role: member.role };
     },
 
     async updateProject(slug, ownerId, input) {
@@ -189,8 +241,9 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
         .where(and(eq(projectsTable.slug, slug.toLowerCase()), eq(projectsTable.ownerId, ownerId)))
         .returning();
       if (!row) return false;
-      // Cascade: drop keys and feedback referencing this project.
+      // Cascade: drop keys, members, and feedback referencing this project.
       await db.delete(keyTable).where(eq(keyTable.projectId, row.id));
+      await db.delete(memberTable).where(eq(memberTable.projectId, row.id));
       await db.delete(feedbackTable).where(eq(feedbackTable.projectId, row.slug));
       return true;
     },
@@ -242,6 +295,55 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
         .where(eq(keyTable.id, row.key.id))
         .catch(() => {});
       return rowToProject(row.project);
+    },
+
+    // ---------------- project members (sharing) ----------------
+    async addProjectMember(projectId, user, role) {
+      try {
+        const [row] = await db
+          .insert(memberTable)
+          .values({
+            id: generateId("pm"),
+            projectId,
+            userId: user.id,
+            email: user.email,
+            name: user.name,
+            role,
+          })
+          .returning();
+        if (!row) throw new Error("addProjectMember: insert returned no row");
+        return rowToMember(row);
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code === "23505") throw new Error("already_member");
+        throw err;
+      }
+    },
+
+    async listProjectMembers(projectId) {
+      const rows = await db
+        .select()
+        .from(memberTable)
+        .where(eq(memberTable.projectId, projectId))
+        .orderBy(memberTable.createdAt);
+      return rows.map(rowToMember);
+    },
+
+    async removeProjectMember(memberId, projectId) {
+      const [row] = await db
+        .delete(memberTable)
+        .where(and(eq(memberTable.id, memberId), eq(memberTable.projectId, projectId)))
+        .returning();
+      return Boolean(row);
+    },
+
+    async getMembership(projectId, userId) {
+      const [row] = await db
+        .select()
+        .from(memberTable)
+        .where(and(eq(memberTable.projectId, projectId), eq(memberTable.userId, userId)))
+        .limit(1);
+      return row ? rowToMember(row) : null;
     },
 
     // ---------------- feedback ----------------

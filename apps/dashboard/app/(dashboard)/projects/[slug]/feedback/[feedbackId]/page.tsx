@@ -21,7 +21,8 @@ export default async function FeedbackDetailPage({ params }: PageProps) {
   const { slug, feedbackId } = await params;
   const fb = await api.getFeedback(feedbackId);
   if (!fb || fb.projectId !== slug) notFound();
-  const me = await api.me();
+  const [me, project] = await Promise.all([api.me(), api.getProject(slug)]);
+  const canTriage = project?.role !== "viewer";
 
   return (
     <div className="space-y-6">
@@ -70,7 +71,13 @@ export default async function FeedbackDetailPage({ params }: PageProps) {
             <Separator />
             <div className="space-y-2">
               <p className="text-xs font-medium text-muted-foreground">Status</p>
-              <StatusControls slug={slug} feedbackId={fb.id} status={fb.status} />
+              {canTriage ? (
+                <StatusControls slug={slug} feedbackId={fb.id} status={fb.status} />
+              ) : (
+                <p className="text-xs italic text-muted-foreground">
+                  View-only access — ask the owner for editor access to change status.
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -100,12 +107,18 @@ export default async function FeedbackDetailPage({ params }: PageProps) {
               </ul>
             )}
             <Separator />
-            <ReplyForm
-              slug={slug}
-              feedbackId={fb.id}
-              {...(me?.user.name ? { defaultName: me.user.name } : {})}
-              {...(me?.user.email ? { defaultEmail: me.user.email } : {})}
-            />
+            {canTriage ? (
+              <ReplyForm
+                slug={slug}
+                feedbackId={fb.id}
+                {...(me?.user.name ? { defaultName: me.user.name } : {})}
+                {...(me?.user.email ? { defaultEmail: me.user.email } : {})}
+              />
+            ) : (
+              <p className="text-sm italic text-muted-foreground">
+                You have view-only access to this project, so you can't reply.
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>

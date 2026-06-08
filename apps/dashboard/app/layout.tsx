@@ -33,7 +33,7 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-background text-foreground">
         {children}
-        <Toaster position="top-right" richColors closeButton />
+        <Toaster position="top-right" theme="light" richColors closeButton />
       </body>
     </html>
   );

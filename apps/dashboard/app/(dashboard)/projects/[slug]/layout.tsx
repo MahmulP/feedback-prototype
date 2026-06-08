@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { KeyRound, MessageSquare, Settings } from "lucide-react";
+import { Eye, KeyRound, MessageSquare, Settings } from "lucide-react";
 
 import { api } from "@/lib/api";
 
@@ -29,12 +29,21 @@ export default async function ProjectLayout({
         <ProjectTab href={`/projects/${encodeURIComponent(slug)}`} icon={MessageSquare}>
           Feedback
         </ProjectTab>
-        <ProjectTab href={`/projects/${encodeURIComponent(slug)}/keys`} icon={KeyRound}>
-          API keys
-        </ProjectTab>
-        <ProjectTab href={`/projects/${encodeURIComponent(slug)}/settings`} icon={Settings}>
-          Settings
-        </ProjectTab>
+        {project.role === "owner" ? (
+          <>
+            <ProjectTab href={`/projects/${encodeURIComponent(slug)}/keys`} icon={KeyRound}>
+              API keys
+            </ProjectTab>
+            <ProjectTab href={`/projects/${encodeURIComponent(slug)}/settings`} icon={Settings}>
+              Settings
+            </ProjectTab>
+          </>
+        ) : (
+          <span className="ml-auto inline-flex items-center gap-1 px-3 py-2 text-xs capitalize text-muted-foreground">
+            <Eye className="size-3.5" aria-hidden />
+            {project.role} access
+          </span>
+        )}
       </nav>
       {children}
     </div>

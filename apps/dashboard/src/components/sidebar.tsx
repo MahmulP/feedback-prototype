@@ -68,6 +68,11 @@ export async function Sidebar({ activeSlug }: { activeSlug?: string }) {
                       <span className="flex min-w-0 items-center gap-2">
                         <Folder className="size-4 shrink-0" aria-hidden />
                         <span className="truncate">{p.name}</span>
+                        {p.role !== "owner" ? (
+                          <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                            {p.role}
+                          </span>
+                        ) : null}
                       </span>
                       {p.openFeedback > 0 ? (
                         <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
@@ -75,7 +80,7 @@ export async function Sidebar({ activeSlug }: { activeSlug?: string }) {
                         </span>
                       ) : null}
                     </Link>
-                    {active ? (
+                    {active && p.role === "owner" ? (
                       <ul className="ml-7 mt-1 space-y-1 text-xs">
                         <li>
                           <Link

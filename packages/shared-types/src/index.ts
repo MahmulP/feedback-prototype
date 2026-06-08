@@ -124,10 +124,54 @@ export interface Project {
   updatedAt: string;
 }
 
-/** Project view for the dashboard, with feedback counters folded in. */
+/**
+ * A user's relationship to a project.
+ *
+ * `owner`  — created the project; full control (settings, keys, sharing, delete).
+ * `editor` — shared collaborator who can view AND triage feedback (status
+ *   changes + replies), but cannot manage keys, settings, sharing, or delete.
+ * `viewer` — shared collaborator with read-only access: can see feedback but
+ *   cannot change status or reply.
+ */
+export type ProjectRole = "owner" | "editor" | "viewer";
+
+/** Roles that can be assigned when sharing a project (owner is implicit). */
+export type SharedRole = Exclude<ProjectRole, "owner">;
+
+/** Project view for the dashboard, with feedback counters + the caller's role. */
 export interface ProjectSummary extends Project {
   totalFeedback: number;
   openFeedback: number;
+  /** The requesting user's role on this project. */
+  role: ProjectRole;
+}
+
+/** A single project + the requesting user's role. Returned by the detail endpoint. */
+export interface ProjectWithRole extends Project {
+  role: ProjectRole;
+}
+
+/**
+ * A shared collaborator on a project. Stored rows have role `editor` or
+ * `viewer` (the owner is implicit, recorded on the project itself, not as a
+ * member row). `email`/`name` are denormalized from the user for display.
+ */
+export interface ProjectMember {
+  id: string;
+  /** The project's `prj_` id (not the slug). */
+  projectId: string;
+  userId: string;
+  email: string;
+  name: string;
+  role: ProjectRole;
+  createdAt: string;
+}
+
+export interface AddProjectMemberInput {
+  /** Email of an existing registered user to share the project with. */
+  email: string;
+  /** Access level to grant. Defaults to `viewer`. */
+  role?: SharedRole;
 }
 
 /** Returned exactly once when a key is created or rotated. */
