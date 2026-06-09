@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ImageOff, MessageSquare, User } from "lucide-react";
+import { Download, ImageOff, MessageSquare, User } from "lucide-react";
 import type { Feedback, FeedbackStatus } from "@mahmulp/shared-types";
 
 import { StatusBadge } from "@/components/status-badge";
@@ -28,6 +28,17 @@ export default async function ProjectFeedbackPage({ params, searchParams }: Page
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">
+          {items.length} feedback {items.length === 1 ? "item" : "items"}
+        </p>
+        <a
+          href={exportHref(slug, status, pageUrl)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
+        >
+          <Download className="size-3.5" aria-hidden /> Export Excel
+        </a>
+      </div>
       <nav aria-label="Filters" className="flex flex-wrap items-center gap-2">
         {STATUS_FILTERS.map((opt) => {
           const href = filterHref(slug, opt.value === "all" ? undefined : opt.value, pageUrl);
@@ -136,6 +147,14 @@ function filterHref(slug: string, status?: string, pageUrl?: string): string {
   if (pageUrl) params.set("pageUrl", pageUrl);
   const qs = params.toString();
   return `/projects/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`;
+}
+
+function exportHref(slug: string, status?: string, pageUrl?: string): string {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (pageUrl) params.set("pageUrl", pageUrl);
+  const qs = params.toString();
+  return `/projects/${encodeURIComponent(slug)}/export${qs ? `?${qs}` : ""}`;
 }
 
 function firstComment(thread: { body: string }[]): string | null {

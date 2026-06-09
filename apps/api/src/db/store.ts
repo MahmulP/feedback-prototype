@@ -423,12 +423,13 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       // rendering on the prototype. An explicit `status` filter wins, so a
       // dashboard can still ask for archived items on demand.
       else if (query.excludeArchived) filters.push(ne(feedbackTable.status, "archived"));
+      // No row cap: the dashboard, export, and share views all need the full
+      // set, and the in-memory store is unbounded too (keep them consistent).
       const rows = await db
         .select()
         .from(feedbackTable)
         .where(and(...filters))
-        .orderBy(desc(feedbackTable.createdAt))
-        .limit(200);
+        .orderBy(desc(feedbackTable.createdAt));
       return rows.map(rowToFeedback);
     },
 

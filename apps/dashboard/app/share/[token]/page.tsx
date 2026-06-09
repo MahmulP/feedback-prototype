@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { ImageOff, Link2Off } from "lucide-react";
+import type { FeedbackStatus } from "@mahmulp/shared-types";
 
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
@@ -6,12 +8,34 @@ import { publicEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
+const STATUS_FILTERS: { value: FeedbackStatus | "all"; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "open", label: "Open" },
+  { value: "resolved", label: "Resolved" },
+  { value: "archived", label: "Archived" },
+];
+
 interface PageProps {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ status?: string; pageUrl?: string }>;
 }
 
-export default async function SharePage({ params }: PageProps) {
+function isStatus(v: unknown): v is FeedbackStatus {
+  return v === "open" || v === "resolved" || v === "archived";
+}
+
+function filterHref(token: string, status?: string, pageUrl?: string): string {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (pageUrl) params.set("pageUrl", pageUrl);
+  const qs = params.toString();
+  return `/share/${encodeURIComponent(token)}${qs ? `?${qs}` : ""}`;
+}
+
+export default async function SharePage({ params, searchParams }: PageProps) {
   const { token } = await params;
+  const { status: statusParam, pageUrl } = await searchParams;
+  const status = isStatus(statusParam) ? statusParam : undefined;
   const project = await api.share.project(token);
 
   if (!project) {
@@ -26,26 +50,72 @@ export default async function SharePage({ params }: PageProps) {
     );
   }
 
-  const { items } = await api.share.listFeedback(token);
+  const { items } = await api.share.listFeedback(token, {
+    ...(status ? { status } : {}),
+    ...(pageUrl ? { pageUrl } : {}),
+  });
+  const distinctPages = Array.from(new Set(items.map((f) => f.pageUrl))).sort();
   const appName = publicEnv().NEXT_PUBLIC_APP_NAME;
 
   return (
     <main className="mx-auto w-full max-w-3xl px-6 py-10">
-      <header className="mb-8 border-b pb-6">
+      <header className="mb-6 border-b pb-6">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">{appName} · Shared view</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight">{project.name}</h1>
         {project.description ? (
           <p className="mt-1 text-sm text-muted-foreground">{project.description}</p>
         ) : null}
         <p className="mt-3 text-xs text-muted-foreground">
-          Read-only view of {items.length} feedback {items.length === 1 ? "item" : "items"}. You&apos;re
-          viewing a shared link — no account needed.
+          Read-only view · {items.length} {items.length === 1 ? "item" : "items"} shown. No account needed.
         </p>
       </header>
 
+      <nav aria-label="Filters" className="mb-6 flex flex-wrap items-center gap-2">
+        {STATUS_FILTERS.map((opt) => {
+          const href = filterHref(token, opt.value === "all" ? undefined : opt.value, pageUrl);
+          const active = (status ?? "all") === opt.value;
+          return (
+            <Link
+              key={opt.value}
+              href={href}
+              className={[
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                active
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-input bg-background hover:bg-accent",
+              ].join(" ")}
+            >
+              {opt.label}
+            </Link>
+          );
+        })}
+        {distinctPages.length > 1 ? (
+          <div className="ml-2 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-muted-foreground">Pages:</span>
+            {distinctPages.map((p) => {
+              const active = pageUrl === p;
+              return (
+                <Link
+                  key={p}
+                  href={filterHref(token, status, active ? undefined : p)}
+                  className={[
+                    "rounded-md border px-2 py-0.5 font-mono text-[11px]",
+                    active
+                      ? "border-primary text-primary"
+                      : "border-input text-muted-foreground hover:text-foreground",
+                  ].join(" ")}
+                >
+                  {p}
+                </Link>
+              );
+            })}
+          </div>
+        ) : null}
+      </nav>
+
       {items.length === 0 ? (
         <p className="rounded-md border bg-card p-8 text-center text-sm text-muted-foreground">
-          No feedback yet.
+          No feedback matches these filters.
         </p>
       ) : (
         <ul className="space-y-4">
