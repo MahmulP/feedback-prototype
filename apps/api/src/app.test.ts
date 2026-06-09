@@ -168,13 +168,26 @@ describe("projects + keys", () => {
 });
 
 describe("SDK ingest", () => {
+  it("captures the original reporter as feedback.author on create", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const key = await issueKey(alice, "alpha");
+    const created = await postJson(
+      "/v1/feedback",
+      { ...baseFeedback, comment: { author: { name: "Dewi", email: "dewi@example.com" }, body: "bug here" } },
+      { headers: { "x-feedback-key": key } }
+    );
+    expect(created.status).toBe(201);
+    const fb = (await created.json()) as { author?: { name: string; email?: string } };
+    expect(fb.author).toEqual({ name: "Dewi", email: "dewi@example.com" });
+  });
+
   it("rejects ingest without a project key", async () => {
     const res = await postJson("/v1/feedback", baseFeedback);
     expect(res.status).toBe(401);
   });
 
-  it("scopes a created pin to the key's project", async () => {
-    const alice = await signup("alice@example.com");
+  it("scopes a created pin to the key's project", async () => {    const alice = await signup("alice@example.com");
     await createProject(alice, "alpha");
     const aliceKey = await issueKey(alice, "alpha");
 
@@ -436,6 +449,105 @@ describe("SDK status transitions via project key", () => {
       })
     );
     expect(res.status).toBe(403);
+  });
+});
+
+describe("share links (public read-only)", () => {
+  async function createShareLink(owner: SessionContext, slug: string) {
+    const res = await postJson(
+      `/v1/projects/${slug}/share-links`,
+      { label: "Client review" },
+      { headers: { cookie: owner.cookie } }
+    );
+    expect(res.status).toBe(201);
+    return (await res.json()) as { id: string; token: string };
+  }
+
+  it("lets anyone with the token read feedback without a session", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const key = await issueKey(alice, "alpha");
+    await postJson(
+      "/v1/feedback",
+      { ...baseFeedback, comment: { author: { name: "Tester" }, body: "hello" } },
+      { headers: { "x-feedback-key": key } }
+    );
+    const { token } = await createShareLink(alice, "alpha");
+
+    // No cookie at all — just the share token.
+    const proj = await app.fetch(
+      new Request("http://test.local/v1/share/project", { headers: { "x-share-token": token } })
+    );
+    expect(proj.status).toBe(200);
+    expect(((await proj.json()) as { slug: string }).slug).toBe("alpha");
+
+    const list = await app.fetch(
+      new Request("http://test.local/v1/share/feedback", { headers: { "x-share-token": token } })
+    );
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { items: { id: string }[] };
+    expect(body.items).toHaveLength(1);
+  });
+
+  it("rejects share endpoints without a valid token", async () => {
+    const res = await app.fetch(new Request("http://test.local/v1/share/feedback"));
+    expect(res.status).toBe(401);
+    const bad = await app.fetch(
+      new Request("http://test.local/v1/share/feedback", { headers: { "x-share-token": "shr_nope" } })
+    );
+    expect(bad.status).toBe(401);
+  });
+
+  it("share token is read-only — it can't mutate feedback", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const key = await issueKey(alice, "alpha");
+    const created = await postJson("/v1/feedback", baseFeedback, {
+      headers: { "x-feedback-key": key },
+    });
+    const fb = (await created.json()) as { id: string };
+    const { token } = await createShareLink(alice, "alpha");
+
+    // A share token presents no user and no project *key*, so status PATCH 401s.
+    const patch = await app.fetch(
+      new Request(`http://test.local/v1/feedback/${fb.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-share-token": token },
+        body: JSON.stringify({ status: "resolved" }),
+      })
+    );
+    expect(patch.status).toBe(401);
+  });
+
+  it("revoking a share link blocks further reads", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const { id, token } = await createShareLink(alice, "alpha");
+
+    const del = await app.fetch(
+      new Request(`http://test.local/v1/projects/alpha/share-links/${id}`, {
+        method: "DELETE",
+        headers: { cookie: alice.cookie },
+      })
+    );
+    expect(del.status).toBe(200);
+
+    const after = await app.fetch(
+      new Request("http://test.local/v1/share/feedback", { headers: { "x-share-token": token } })
+    );
+    expect(after.status).toBe(401);
+  });
+
+  it("non-owners cannot create share links", async () => {
+    const alice = await signup("alice@example.com");
+    await createProject(alice, "alpha");
+    const bob = await signup("bob@example.com");
+    const res = await postJson(
+      "/v1/projects/alpha/share-links",
+      {},
+      { headers: { cookie: bob.cookie } }
+    );
+    expect(res.status).toBe(404);
   });
 });
 

@@ -48,6 +48,14 @@ export interface Feedback {
   selector: string;
   coordinates: FeedbackCoordinates;
   viewport: ViewportInfo;
+  /**
+   * The original reporter — the author of the first comment captured when the
+   * pin was created. Denormalized at creation so the dashboard can show
+   * "reported by" without walking the thread. Absent on pins created without
+   * an initial comment (and on rows created before this field existed; fall
+   * back to `thread[0].author`).
+   */
+  author?: FeedbackAuthor;
   /** Storage key returned by the API after upload. Absent until a screenshot is uploaded. */
   screenshotKey?: string;
   status: FeedbackStatus;
@@ -174,6 +182,53 @@ export interface AddProjectMemberInput {
   role?: SharedRole;
 }
 
+// ---------------- Share links (public, read-only) ----------------
+
+/**
+ * A revocable, read-only public link to a project's feedback. Anyone holding
+ * the token can VIEW feedback for the project without an account. The owner
+ * creates and revokes these. Only the SHA-256 hash + a short prefix are
+ * stored; the plaintext token (`shr_…`) is shown once at creation.
+ */
+export interface ProjectShareLink {
+  id: string;
+  /** The project's `prj_` id (not the slug). */
+  projectId: string;
+  /** First few characters of the token, for UI display. */
+  prefix: string;
+  /** Optional human label, e.g. "Client review". */
+  label?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  /** Optional expiry. Absent means it stays active until revoked. */
+  expiresAt?: string;
+}
+
+/** Returned exactly once when a share link is created. */
+export interface ProjectShareLinkIssued extends ProjectShareLink {
+  /** The plaintext token. Shown only at creation; the API stores a hash. */
+  token: string;
+  /**
+   * Full share URL, built server-side from the API's `DASHBOARD_URL` env.
+   * Absent when `DASHBOARD_URL` is not configured — the client then falls
+   * back to its own origin.
+   */
+  url?: string;
+}
+
+export interface CreateShareLinkInput {
+  label?: string;
+  /** Optional lifetime in days. Omit for a link that stays active until revoked. */
+  expiresInDays?: number;
+}
+
+/** Minimal project info exposed on the public share view. */
+export interface SharedProjectInfo {
+  slug: string;
+  name: string;
+  description?: string;
+}
+
 /** Returned exactly once when a key is created or rotated. */
 export interface ProjectApiKeyIssued {
   id: string;
@@ -192,8 +247,7 @@ export interface ProjectApiKeyMetadata {
   lastUsedAt?: string;
 }
 
-export interface CreateProjectInput {
-  slug: string;
+export interface CreateProjectInput {  slug: string;
   name: string;
   description?: string;
   allowedOrigins?: string[];

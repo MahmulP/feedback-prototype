@@ -78,3 +78,8 @@ export const addMemberSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(200),
   role: z.enum(["editor", "viewer"]).default("viewer"),
 });
+
+export const createShareLinkSchema = z.object({
+  label: z.string().trim().max(80).optional(),
+  expiresInDays: z.number().int().positive().max(365).optional(),
+});

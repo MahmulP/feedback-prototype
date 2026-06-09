@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { ImageOff, MessageSquare } from "lucide-react";
-import type { FeedbackStatus } from "@mahmulp/shared-types";
+import { ImageOff, MessageSquare, User } from "lucide-react";
+import type { Feedback, FeedbackStatus } from "@mahmulp/shared-types";
 
 import { StatusBadge } from "@/components/status-badge";
 import { api } from "@/lib/api";
@@ -108,6 +108,12 @@ export default async function ProjectFeedbackPage({ params, searchParams }: Page
                       <MessageSquare aria-hidden className="size-3" />
                       {fb.thread.length}
                     </span>
+                    {reporterName(fb) ? (
+                      <span className="inline-flex items-center gap-1">
+                        <User aria-hidden className="size-3" />
+                        {reporterName(fb)}
+                      </span>
+                    ) : null}
                     <span>{new Date(fb.createdAt).toLocaleString()}</span>
                   </div>
                 </div>
@@ -134,4 +140,9 @@ function filterHref(slug: string, status?: string, pageUrl?: string): string {
 
 function firstComment(thread: { body: string }[]): string | null {
   return thread[0]?.body ?? null;
+}
+
+/** Original reporter: the denormalized author, falling back to the first comment. */
+function reporterName(fb: Feedback): string | null {
+  return fb.author?.name ?? fb.thread[0]?.author.name ?? null;
 }

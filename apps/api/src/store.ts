@@ -10,6 +10,7 @@ import type {
   ProjectApiKeyMetadata,
   ProjectMember,
   ProjectRole,
+  ProjectShareLink,
   ProjectSummary,
   SharedRole,
   UpdateProjectInput,
@@ -50,6 +51,16 @@ export interface FeedbackStore {
   removeProjectMember(memberId: string, projectId: string): Promise<boolean>;
   getMembership(projectId: string, userId: string): Promise<ProjectMember | null>;
 
+  // --- project share links (public, read-only)
+  createShareLink(
+    projectId: string,
+    input: { tokenHash: string; prefix: string; label?: string; expiresAt?: string }
+  ): Promise<ProjectShareLink>;
+  listShareLinks(projectId: string): Promise<ProjectShareLink[]>;
+  deleteShareLink(id: string, projectId: string): Promise<boolean>;
+  /** Resolve the project a share token grants read access to. Skips expired/unknown tokens. Touches `last_used_at`. */
+  resolveProjectByShareTokenHash(tokenHash: string): Promise<Project | null>;
+
   // --- project api keys
   createProjectApiKey(
     projectId: string,
@@ -84,6 +95,10 @@ interface StoredApiKey extends ProjectApiKeyMetadata {
 
 interface StoredMember extends ProjectMember {}
 
+interface StoredShareLink extends ProjectShareLink {
+  tokenHash: string;
+}
+
 export function createInMemoryStore(): FeedbackStore {
   const users = new Map<string, StoredUser>();
   const usersByEmail = new Map<string, string>();
@@ -91,6 +106,8 @@ export function createInMemoryStore(): FeedbackStore {
   const apiKeys = new Map<string, StoredApiKey>();
   const apiKeysByHash = new Map<string, string>();
   const members = new Map<string, StoredMember>();
+  const shareLinks = new Map<string, StoredShareLink>();
+  const shareLinksByHash = new Map<string, string>();
   const feedbackItems = new Map<string, Feedback>();
 
   function clone<T>(value: T): T {
@@ -230,6 +247,12 @@ export function createInMemoryStore(): FeedbackStore {
       for (const [id, member] of members) {
         if (member.projectId === project.id) members.delete(id);
       }
+      for (const [id, link] of shareLinks) {
+        if (link.projectId === project.id) {
+          shareLinks.delete(id);
+          shareLinksByHash.delete(link.tokenHash);
+        }
+      }
       return true;
     },
 
@@ -271,6 +294,56 @@ export function createInMemoryStore(): FeedbackStore {
     async getMembership(projectId, userId) {
       for (const member of members.values()) {
         if (member.projectId === projectId && member.userId === userId) return clone(member);
+      }
+      return null;
+    },
+
+    // --- project share links (public, read-only) --------------------
+    async createShareLink(projectId, input) {
+      const link: StoredShareLink = {
+        id: generateId("shl"),
+        projectId,
+        tokenHash: input.tokenHash,
+        prefix: input.prefix,
+        ...(input.label ? { label: input.label } : {}),
+        ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+        createdAt: nowIso(),
+      };
+      shareLinks.set(link.id, link);
+      shareLinksByHash.set(link.tokenHash, link.id);
+      const { tokenHash, ...publicLink } = link;
+      void tokenHash;
+      return clone(publicLink);
+    },
+
+    async listShareLinks(projectId) {
+      const list: ProjectShareLink[] = [];
+      for (const link of shareLinks.values()) {
+        if (link.projectId !== projectId) continue;
+        const { tokenHash, ...publicLink } = link;
+        void tokenHash;
+        list.push(clone(publicLink));
+      }
+      return list.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+    },
+
+    async deleteShareLink(id, projectId) {
+      const link = shareLinks.get(id);
+      if (!link || link.projectId !== projectId) return false;
+      shareLinks.delete(id);
+      shareLinksByHash.delete(link.tokenHash);
+      return true;
+    },
+
+    async resolveProjectByShareTokenHash(tokenHash) {
+      const id = shareLinksByHash.get(tokenHash);
+      if (!id) return null;
+      const link = shareLinks.get(id);
+      if (!link) return null;
+      if (link.expiresAt && Date.parse(link.expiresAt) <= Date.now()) return null;
+      link.lastUsedAt = nowIso();
+      for (const project of projects.values()) {
+        if (project.id === link.projectId) return clone(project);
       }
       return null;
     },
@@ -354,6 +427,7 @@ export function createInMemoryStore(): FeedbackStore {
         selector: input.selector,
         coordinates: { ...input.coordinates },
         viewport: { ...input.viewport },
+        ...(input.comment ? { author: { ...input.comment.author } } : {}),
         status: "open",
         thread: input.comment
           ? [

@@ -108,3 +108,51 @@ export async function removeMemberAction(slug: string, memberId: string): Promis
     return { ok: false, error: err instanceof Error ? err.message : "Failed" };
   }
 }
+
+const shareLinkSchema = z.object({
+  label: z.string().trim().max(80).optional().or(z.literal("").transform(() => undefined)),
+  expiresInDays: z.coerce.number().int().positive().max(365).optional(),
+});
+
+export interface CreateShareLinkResult {
+  ok: boolean;
+  token?: string;
+  url?: string;
+  error?: string;
+}
+
+export async function createShareLinkAction(
+  slug: string,
+  formData: FormData
+): Promise<CreateShareLinkResult> {
+  const rawDays = formData.get("expiresInDays");
+  const parsed = shareLinkSchema.safeParse({
+    label: formData.get("label") ?? undefined,
+    expiresInDays: rawDays === null || rawDays === "" ? undefined : rawDays,
+  });
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  try {
+    const issued = await api.createShareLink(slug, {
+      ...(parsed.data.label !== undefined ? { label: parsed.data.label } : {}),
+      ...(parsed.data.expiresInDays !== undefined ? { expiresInDays: parsed.data.expiresInDays } : {}),
+    });
+    revalidatePath(`/projects/${encodeURIComponent(slug)}/settings`);
+    return { ok: true, token: issued.token, ...(issued.url ? { url: issued.url } : {}) };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: err.message };
+    return { ok: false, error: err instanceof Error ? err.message : "Failed" };
+  }
+}
+
+export async function deleteShareLinkAction(slug: string, linkId: string): Promise<MemberResult> {
+  try {
+    await api.deleteShareLink(slug, linkId);
+    revalidatePath(`/projects/${encodeURIComponent(slug)}/settings`);
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof ApiError) return { ok: false, error: err.message };
+    return { ok: false, error: err instanceof Error ? err.message : "Failed" };
+  }
+}

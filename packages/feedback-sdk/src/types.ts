@@ -46,6 +46,8 @@ export interface Feedback {
   selector: string;
   coordinates: FeedbackCoordinates;
   viewport: ViewportInfo;
+  /** The original reporter — author of the first comment captured at creation. */
+  author?: FeedbackAuthor;
   /** Storage key returned by the API after upload. Absent until a screenshot is uploaded. */
   screenshotKey?: string;
   status: FeedbackStatus;

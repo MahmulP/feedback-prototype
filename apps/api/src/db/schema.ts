@@ -18,6 +18,7 @@ import {
  *   - projects         ← per-user projects, identified by slug
  *   - project_api_keys ← per-project ingest keys (hashed; SDK uses these)
  *   - project_members  ← users a project has been shared with (collaborators)
+ *   - project_share_links ← revocable read-only public links to a project's feedback
  *   - feedback         ← pins, references project by slug for SDK ergonomics
  */
 
@@ -93,13 +94,36 @@ export const projectMembers = pgTable(
   })
 );
 
-export const feedback = pgTable(
-  "feedback",
+export const projectShareLinks = pgTable(
+  "project_share_links",
   {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    /** SHA-256 hex of the plaintext token. Plaintext (`shr_…`) shown once. */
+    tokenHash: text("token_hash").notNull(),
+    /** First chars of the token, for UI display only. */
+    prefix: text("prefix").notNull(),
+    label: text("label"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    /** Optional expiry; null means active until revoked. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (t) => ({
+    tokenHashUnique: uniqueIndex("project_share_links_hash_unique").on(t.tokenHash),
+    byProject: index("project_share_links_project_idx").on(t.projectId),
+  })
+);
+
+export const feedback = pgTable(
+  "feedback",  {
     id: text("id").primaryKey(),
     projectId: text("project_id").notNull(),
     pageUrl: text("page_url").notNull(),
     selector: text("selector").notNull(),
+
+    /** Original reporter — author of the first comment at creation. Nullable. */
+    author: jsonb("author").$type<{ name: string; email?: string }>(),
 
     xPercent: doublePrecision("x_percent").notNull(),
     yPercent: doublePrecision("y_percent").notNull(),

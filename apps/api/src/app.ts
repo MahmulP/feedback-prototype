@@ -6,7 +6,9 @@ import {
   type AppVariables,
   currentUser,
   generateApiKey,
+  generateShareToken,
   requireProjectKey,
+  requireShareAccess,
   requireUser,
 } from "./auth.js";
 import type { ApiEnv } from "./env.js";
@@ -18,6 +20,7 @@ import {
   commentInputSchema,
   coordinatesUpdateSchema,
   createFeedbackSchema,
+  createShareLinkSchema,
   listQuerySchema,
   loginSchema,
   projectCreateSchema,
@@ -240,6 +243,96 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     const ok = await deps.store.removeProjectMember(memberId, access.project.id);
     if (!ok) return c.json({ error: { code: "member_not_found", message: "no such member" } }, 404);
     return c.json({ ok: true });
+  });
+
+  // -------------------- Project share links (owner-managed) --------------------
+  app.get("/v1/projects/:slug/share-links", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    if (access.role !== "owner") {
+      return c.json({ error: { code: "forbidden", message: "only the owner can manage share links" } }, 403);
+    }
+    const items = await deps.store.listShareLinks(access.project.id);
+    return c.json({ items });
+  });
+
+  app.post("/v1/projects/:slug/share-links", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const body = (await safeJson(c)) ?? {};
+    const parsed = createShareLinkSchema.safeParse(body);
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    if (access.role !== "owner") {
+      return c.json({ error: { code: "forbidden", message: "only the owner can create share links" } }, 403);
+    }
+    const issued = generateShareToken();
+    const expiresAt = parsed.data.expiresInDays
+      ? new Date(Date.now() + parsed.data.expiresInDays * 86_400_000).toISOString()
+      : undefined;
+    const link = await deps.store.createShareLink(access.project.id, {
+      tokenHash: issued.hash,
+      prefix: issued.prefix,
+      ...(parsed.data.label ? { label: parsed.data.label } : {}),
+      ...(expiresAt ? { expiresAt } : {}),
+    });
+    // The plaintext token is returned **once**, then only the hash is stored.
+    // Build the full URL from DASHBOARD_URL when configured (single source of
+    // truth for the dashboard's public base; same env used for email links).
+    const url = deps.env.DASHBOARD_URL
+      ? `${deps.env.DASHBOARD_URL.replace(/\/$/, "")}/share/${issued.token}`
+      : undefined;
+    return c.json({ ...link, token: issued.token, ...(url ? { url } : {}) }, 201);
+  });
+
+  app.delete("/v1/projects/:slug/share-links/:linkId", requireUser, async (c) => {
+    const slug = c.req.param("slug");
+    const linkId = c.req.param("linkId");
+    const access = await deps.store.getProjectForUser(slug, currentUser(c).id);
+    if (!access) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    if (access.role !== "owner") {
+      return c.json({ error: { code: "forbidden", message: "only the owner can revoke share links" } }, 403);
+    }
+    const ok = await deps.store.deleteShareLink(linkId, access.project.id);
+    if (!ok) return c.json({ error: { code: "share_link_not_found", message: "no such share link" } }, 404);
+    return c.json({ ok: true });
+  });
+
+  // -------------------- Public share views (read-only, share-token scoped) --------------------
+  // These require a valid `x-share-token` and never a login. Read-only: list +
+  // detail of a project's feedback so people who left feedback can follow up
+  // without an account. No mutations are exposed here.
+  app.get("/v1/share/project", requireShareAccess, async (c) => {
+    const slug = c.var.auth.shareProjectId!;
+    const project = await deps.store.getProject(slug);
+    if (!project) return c.json({ error: { code: "project_not_found", message: "no such project" } }, 404);
+    return c.json({
+      slug: project.slug,
+      name: project.name,
+      ...(project.description ? { description: project.description } : {}),
+    });
+  });
+
+  app.get("/v1/share/feedback", requireShareAccess, async (c) => {
+    const slug = c.var.auth.shareProjectId!;
+    const parsed = listQuerySchema.safeParse({
+      pageUrl: c.req.query("pageUrl") ?? undefined,
+      status: c.req.query("status") ?? undefined,
+    });
+    if (!parsed.success) return validation(c, parsed.error.message);
+    const items = await deps.store.list({ projectId: slug, ...parsed.data });
+    return c.json({ items });
+  });
+
+  app.get("/v1/share/feedback/:id", requireShareAccess, async (c) => {
+    const slug = c.var.auth.shareProjectId!;
+    const id = c.req.param("id");
+    const fb = await deps.store.get(id);
+    if (!fb || fb.projectId !== slug) {
+      return c.json({ error: { code: "feedback_not_found", message: "no such feedback" } }, 404);
+    }
+    return c.json(fb);
   });
 
   // -------------------- Project API keys ------------------------

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, ImageOff } from "lucide-react";
+import { ChevronLeft, ImageOff, User } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ export default async function FeedbackDetailPage({ params }: PageProps) {
   if (!fb || fb.projectId !== slug) notFound();
   const [me, project] = await Promise.all([api.me(), api.getProject(slug)]);
   const canTriage = project?.role !== "viewer";
+  const reporter = fb.author ?? fb.thread[0]?.author ?? null;
 
   return (
     <div className="space-y-6">
@@ -36,6 +37,13 @@ export default async function FeedbackDetailPage({ params }: PageProps) {
         <div className="space-y-1">
           <h1 className="break-all font-mono text-xl font-semibold tracking-tight">{fb.id}</h1>
           <p className="font-mono text-xs text-muted-foreground">{fb.pageUrl}</p>
+          {reporter ? (
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <User className="size-3" aria-hidden />
+              Reported by <span className="font-medium text-foreground">{reporter.name}</span>
+              {reporter.email ? <span className="opacity-70">· {reporter.email}</span> : null}
+            </p>
+          ) : null}
         </div>
         <StatusBadge status={fb.status} />
       </header>

@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 
 import { MembersControls } from "./members-controls";
 import { SettingsForm } from "./settings-form";
+import { ShareLinksControls } from "./share-links-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,11 @@ export default async function SettingsPage({ params }: PageProps) {
     );
   }
 
-  const [me, membersRes] = await Promise.all([api.me(), api.listProjectMembers(slug)]);
+  const [me, membersRes, shareLinksRes] = await Promise.all([
+    api.me(),
+    api.listProjectMembers(slug),
+    api.listShareLinks(slug),
+  ]);
 
   return (
     <div className="space-y-8">
@@ -44,6 +49,7 @@ export default async function SettingsPage({ params }: PageProps) {
         ownerEmail={me?.user.email ?? ""}
         members={membersRes.items}
       />
+      <ShareLinksControls slug={slug} links={shareLinksRes.items} />
     </div>
   );
 }

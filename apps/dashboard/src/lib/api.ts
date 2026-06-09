@@ -7,8 +7,11 @@ import type {
   ProjectApiKeyMetadata,
   ProjectApiKeyIssued,
   ProjectMember,
+  ProjectShareLink,
+  ProjectShareLinkIssued,
   ProjectSummary,
   ProjectWithRole,
+  SharedProjectInfo,
   SharedRole,
   User,
 } from "@mahmulp/shared-types";
@@ -186,6 +189,63 @@ export const api = {
       `/v1/projects/${encodeURIComponent(slug)}/members/${encodeURIComponent(memberId)}`,
       { method: "DELETE" }
     );
+  },
+
+  // --- project share links (owner-managed)
+  async listShareLinks(slug: string): Promise<{ items: ProjectShareLink[] }> {
+    return request<{ items: ProjectShareLink[] }>(`/v1/projects/${encodeURIComponent(slug)}/share-links`);
+  },
+  async createShareLink(
+    slug: string,
+    input: { label?: string; expiresInDays?: number } = {}
+  ): Promise<ProjectShareLinkIssued> {
+    return request<ProjectShareLinkIssued>(`/v1/projects/${encodeURIComponent(slug)}/share-links`, {
+      method: "POST",
+      body: input,
+    });
+  },
+  async deleteShareLink(slug: string, linkId: string): Promise<void> {
+    await request<{ ok: true }>(
+      `/v1/projects/${encodeURIComponent(slug)}/share-links/${encodeURIComponent(linkId)}`,
+      { method: "DELETE" }
+    );
+  },
+
+  // --- public share views (read-only, consumed by /share/[token])
+  // No session cookie; the share token is the credential (sent as x-share-token).
+  share: {
+    async project(token: string): Promise<SharedProjectInfo | null> {
+      try {
+        return await request<SharedProjectInfo>("/v1/share/project", {
+          anonymous: true,
+          headers: { "x-share-token": token },
+        });
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 401 || err.status === 404)) return null;
+        throw err;
+      }
+    },
+    async listFeedback(
+      token: string,
+      query: { pageUrl?: string; status?: FeedbackStatus } = {}
+    ): Promise<{ items: Feedback[] }> {
+      return request<{ items: Feedback[] }>("/v1/share/feedback", {
+        anonymous: true,
+        headers: { "x-share-token": token },
+        query,
+      });
+    },
+    async getFeedback(token: string, id: string): Promise<Feedback | null> {
+      try {
+        return await request<Feedback>(`/v1/share/feedback/${encodeURIComponent(id)}`, {
+          anonymous: true,
+          headers: { "x-share-token": token },
+        });
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 401 || err.status === 404)) return null;
+        throw err;
+      }
+    },
   },
 
   // --- feedback (dashboard reads, scoped to owner)

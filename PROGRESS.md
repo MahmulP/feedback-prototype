@@ -51,6 +51,7 @@ Hidup-update progress untuk seluruh proyek. Centang berarti sudah selesai dan te
 - [x] Status transitions (`PATCH /v1/feedback/:id`, owner/editor **or** matching project key — fixes SDK Resolve/Archive)
 - [x] Comment thread reply (owner/editor OR project key; viewers read-only)
 - [x] **Project sharing** — `project_members` table, `editor`/`viewer` roles, member CRUD routes (`/v1/projects/:slug/members`), access via `getProjectForUser` / `listProjectsForUser`
+- [x] **Public share links** — `project_share_links` table, read-only `shr_…` tokens (`x-share-token`), owner CRUD (`/v1/projects/:slug/share-links`), public reads (`/v1/share/*`), URL built from `DASHBOARD_URL`
 - [x] Local filesystem storage with path-traversal & MIME guards
 - [x] Per-key rate limit on ingest endpoints
 - [x] Structured JSON logging

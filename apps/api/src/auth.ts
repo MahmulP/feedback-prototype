@@ -37,9 +37,21 @@ export function generateApiKey(): { key: string; prefix: string; hash: string } 
   return { key, prefix: key.slice(0, 11), hash: hashApiKey(key) };
 }
 
+/**
+ * Generate a read-only public share token (`shr_…`). Same entropy as an API
+ * key; only the hash + prefix are persisted.
+ */
+export function generateShareToken(): { token: string; prefix: string; hash: string } {
+  const raw = crypto.randomBytes(32).toString("base64url");
+  const token = `shr_${raw}`;
+  return { token, prefix: token.slice(0, 12), hash: hashApiKey(token) };
+}
+
 export interface AuthBag {
   user?: { id: string; email: string; name: string };
-  scopedProjectId?: string; // project slug (matches Feedback.projectId)
+  scopedProjectId?: string; // project slug (matches Feedback.projectId) — SDK ingest key
+  /** Project slug resolved from a read-only public share token (`x-share-token`). */
+  shareProjectId?: string;
 }
 
 export interface AuthDeps {
@@ -66,6 +78,12 @@ export function authMiddleware(deps: AuthDeps): MiddlewareHandler<{ Variables: A
     if (feedbackKey) {
       const project = await deps.store.resolveProjectByKeyHash(hashApiKey(feedbackKey));
       if (project) bag.scopedProjectId = project.slug;
+    }
+
+    const shareToken = c.req.header("x-share-token")?.trim();
+    if (shareToken) {
+      const project = await deps.store.resolveProjectByShareTokenHash(hashApiKey(shareToken));
+      if (project) bag.shareProjectId = project.slug;
     }
 
     c.set("auth", bag);
@@ -95,6 +113,16 @@ export const requireUser: MiddlewareHandler<{ Variables: AppVariables }> = async
 export const requireProjectKey: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   const bag = c.var.auth;
   if (!bag?.scopedProjectId) return unauthorized(c, "missing or invalid x-feedback-key");
+  await next();
+};
+
+/**
+ * Reject unless the request carries a valid, unexpired share token. Read-only
+ * public access; sets `shareProjectId` on the context for handlers to scope by.
+ */
+export const requireShareAccess: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+  const bag = c.var.auth;
+  if (!bag?.shareProjectId) return unauthorized(c, "missing, invalid, or expired share token");
   await next();
 };
 

@@ -7,6 +7,7 @@ import type {
   ProjectApiKeyMetadata,
   ProjectMember,
   ProjectRole,
+  ProjectShareLink,
   ProjectSummary,
   SharedRole,
   User,
@@ -18,6 +19,7 @@ import {
   feedback as feedbackTable,
   projectApiKeys as keyTable,
   projectMembers as memberTable,
+  projectShareLinks as shareLinkTable,
   projects as projectsTable,
   type ThreadComment,
   users as usersTable,
@@ -75,11 +77,24 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
     };
   }
 
+  function rowToShareLink(row: typeof shareLinkTable.$inferSelect): ProjectShareLink {
+    return {
+      id: row.id,
+      projectId: row.projectId,
+      prefix: row.prefix,
+      ...(row.label ? { label: row.label } : {}),
+      createdAt: row.createdAt.toISOString(),
+      ...(row.lastUsedAt ? { lastUsedAt: row.lastUsedAt.toISOString() } : {}),
+      ...(row.expiresAt ? { expiresAt: row.expiresAt.toISOString() } : {}),
+    };
+  }
+
   function rowToFeedback(row: typeof feedbackTable.$inferSelect): Feedback {    return {
       id: row.id,
       projectId: row.projectId,
       pageUrl: row.pageUrl,
       selector: row.selector,
+      ...(row.author ? { author: row.author } : {}),
       coordinates: {
         xPercent: row.xPercent,
         yPercent: row.yPercent,
@@ -241,9 +256,10 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
         .where(and(eq(projectsTable.slug, slug.toLowerCase()), eq(projectsTable.ownerId, ownerId)))
         .returning();
       if (!row) return false;
-      // Cascade: drop keys, members, and feedback referencing this project.
+      // Cascade: drop keys, members, share links, and feedback referencing this project.
       await db.delete(keyTable).where(eq(keyTable.projectId, row.id));
       await db.delete(memberTable).where(eq(memberTable.projectId, row.id));
+      await db.delete(shareLinkTable).where(eq(shareLinkTable.projectId, row.id));
       await db.delete(feedbackTable).where(eq(feedbackTable.projectId, row.slug));
       return true;
     },
@@ -346,6 +362,58 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       return row ? rowToMember(row) : null;
     },
 
+    // ---------------- project share links (public, read-only) ----------------
+    async createShareLink(projectId, input) {
+      const [row] = await db
+        .insert(shareLinkTable)
+        .values({
+          id: generateId("shl"),
+          projectId,
+          tokenHash: input.tokenHash,
+          prefix: input.prefix,
+          ...(input.label ? { label: input.label } : {}),
+          ...(input.expiresAt ? { expiresAt: new Date(input.expiresAt) } : {}),
+        })
+        .returning();
+      if (!row) throw new Error("createShareLink: insert returned no row");
+      return rowToShareLink(row);
+    },
+
+    async listShareLinks(projectId) {
+      const rows = await db
+        .select()
+        .from(shareLinkTable)
+        .where(eq(shareLinkTable.projectId, projectId))
+        .orderBy(shareLinkTable.createdAt);
+      return rows.map(rowToShareLink);
+    },
+
+    async deleteShareLink(id, projectId) {
+      const [row] = await db
+        .delete(shareLinkTable)
+        .where(and(eq(shareLinkTable.id, id), eq(shareLinkTable.projectId, projectId)))
+        .returning();
+      return Boolean(row);
+    },
+
+    async resolveProjectByShareTokenHash(tokenHash) {
+      const [row] = await db
+        .select({ link: shareLinkTable, project: projectsTable })
+        .from(shareLinkTable)
+        .innerJoin(projectsTable, eq(projectsTable.id, shareLinkTable.projectId))
+        .where(eq(shareLinkTable.tokenHash, tokenHash))
+        .limit(1);
+      if (!row) return null;
+      if (row.link.expiresAt && row.link.expiresAt.getTime() <= Date.now()) return null;
+      // Touch last_used_at, fire-and-forget.
+      void db
+        .update(shareLinkTable)
+        .set({ lastUsedAt: new Date() })
+        .where(eq(shareLinkTable.id, row.link.id))
+        .catch(() => {});
+      return rowToProject(row.project);
+    },
+
     // ---------------- feedback ----------------
     async list(query) {
       const filters = [eq(feedbackTable.projectId, query.projectId)];
@@ -388,6 +456,7 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
           projectId: input.projectId,
           pageUrl: input.pageUrl,
           selector: input.selector,
+          ...(input.comment ? { author: { ...input.comment.author } } : {}),
           xPercent: input.coordinates.xPercent,
           yPercent: input.coordinates.yPercent,
           xPx: input.coordinates.xPx,
