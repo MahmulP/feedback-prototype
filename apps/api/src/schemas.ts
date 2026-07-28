@@ -38,6 +38,8 @@ export const listQuerySchema = z.object({
   status: z.enum(["open", "resolved", "archived"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
   page: z.coerce.number().int().min(1).optional(),
+  dateFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateFrom must be in YYYY-MM-DD format").optional(),
+  dateTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "dateTo must be in YYYY-MM-DD format").optional(),
 });
 
 export const statusUpdateSchema = z.object({

@@ -403,6 +403,8 @@ export function createInMemoryStore(): FeedbackStore {
       const filtered = all
         .filter((f) => (query.pageUrl ? f.pageUrl === query.pageUrl : true))
         .filter((f) => (query.status ? f.status === query.status : true))
+        .filter((f) => (query.dateFrom ? f.createdAt >= `${query.dateFrom}T00:00:00.000Z` : true))
+        .filter((f) => (query.dateTo ? f.createdAt <= `${query.dateTo}T23:59:59.999Z` : true))
         // SDK clients pass `excludeArchived: true` so old archived pins
         // don't keep rendering on the prototype. An explicit `status` filter
         // wins (caller can still ask for archived items by name).

@@ -660,4 +660,66 @@ describe("email notifications", () => {
     expect(body.page).toBe(2);
     expect(body.totalPages).toBe(3);
   });
+
+  it("supports dateFrom and dateTo filtering when listing feedback", async () => {
+    const alice = await signup("datefilter@example.com");
+    await createProject(alice, "dates");
+    const key = await issueKey(alice, "dates");
+
+    // create feedback 1
+    const fb1 = await postJson(
+      "/v1/feedback",
+      { ...baseFeedback, pageUrl: "/old" },
+      { headers: { "x-feedback-key": key } }
+    );
+
+    // add small delay so timestamps are distinct
+    await new Promise((r) => setTimeout(r, 10));
+
+    // create feedback 2
+    const fb2 = await postJson(
+      "/v1/feedback",
+      { ...baseFeedback, pageUrl: "/new" },
+      { headers: { "x-feedback-key": key } }
+    );
+    const fb1Data = (await fb1.json()) as { createdAt: string };
+    const fb2Data = (await fb2.json()) as { createdAt: string };
+
+    const list = await app.fetch(
+      new Request(`http://test.local/v1/projects/dates/feedback?dateFrom=${encodeURIComponent(fb2Data.createdAt.substring(0, 10))}`, {
+        headers: { cookie: alice.cookie },
+      })
+    );
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { items: any[] };
+    // since both were created on the same day, filtering by >= start of day
+    // will actually return BOTH. We need to assert they are both there.
+    expect(body.items).toHaveLength(2);
+
+    const listTo = await app.fetch(
+      new Request(`http://test.local/v1/projects/dates/feedback?dateTo=${encodeURIComponent(fb1Data.createdAt.substring(0, 10))}`, {
+        headers: { cookie: alice.cookie },
+      })
+    );
+    const bodyTo = (await listTo.json()) as { items: any[] };
+    expect(bodyTo.items).toHaveLength(2);
+
+    // Verify out-of-range dates return empty lists
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().substring(0, 10);
+    const yesterday = new Date(Date.now() - 86400000).toISOString().substring(0, 10);
+
+    const listEmptyFrom = await app.fetch(
+      new Request(`http://test.local/v1/projects/dates/feedback?dateFrom=${tomorrow}`, {
+        headers: { cookie: alice.cookie },
+      })
+    );
+    expect(((await listEmptyFrom.json()) as { items: any[] }).items).toHaveLength(0);
+
+    const listEmptyTo = await app.fetch(
+      new Request(`http://test.local/v1/projects/dates/feedback?dateTo=${yesterday}`, {
+        headers: { cookie: alice.cookie },
+      })
+    );
+    expect(((await listEmptyTo.json()) as { items: any[] }).items).toHaveLength(0);
+  });
 });

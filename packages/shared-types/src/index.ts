@@ -91,6 +91,8 @@ export interface ListFeedbackQuery {
   excludeArchived?: boolean;
   limit?: number;
   page?: number;
+  dateFrom?: string;
+  dateTo?: string;
 }
 
 export interface ListFeedbackResult {

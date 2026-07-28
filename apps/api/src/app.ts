@@ -321,6 +321,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
       status: c.req.query("status") ?? undefined,
       limit: c.req.query("limit") ?? undefined,
       page: c.req.query("page") ?? undefined,
+      dateFrom: c.req.query("dateFrom") ?? undefined,
+      dateTo: c.req.query("dateTo") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
     const result = await deps.store.list({ projectId: slug, ...parsed.data });
@@ -387,6 +389,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
       status: c.req.query("status") ?? undefined,
       limit: c.req.query("limit") ?? undefined,
       page: c.req.query("page") ?? undefined,
+      dateFrom: c.req.query("dateFrom") ?? undefined,
+      dateTo: c.req.query("dateTo") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
     const result = await deps.store.list({ projectId: access.project.slug, ...parsed.data });
@@ -494,6 +498,8 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
       status: c.req.query("status") ?? undefined,
       limit: c.req.query("limit") ?? undefined,
       page: c.req.query("page") ?? undefined,
+      dateFrom: c.req.query("dateFrom") ?? undefined,
+      dateTo: c.req.query("dateTo") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
     const result = await deps.store.list({

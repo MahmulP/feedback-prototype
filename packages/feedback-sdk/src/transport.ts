@@ -65,6 +65,10 @@ export function createHttpTransport(options: HttpTransportOptions): FeedbackTran
       const params = new URLSearchParams();
       if (query.pageUrl) params.set("pageUrl", query.pageUrl);
       if (query.status) params.set("status", query.status);
+      if (query.limit) params.set("limit", String(query.limit));
+      if (query.page) params.set("page", String(query.page));
+      if (query.dateFrom) params.set("dateFrom", query.dateFrom);
+      if (query.dateTo) params.set("dateTo", query.dateTo);
       const qs = params.toString();
       const res = await fetchImpl(`${base}/v1/feedback${qs ? `?${qs}` : ""}`, {
         method: "GET",

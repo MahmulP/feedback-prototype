@@ -47,7 +47,9 @@ export function createMockTransport(options: MockTransportOptions = {}): Feedbac
       const filtered = items
         .filter((f) => (query.projectId ? f.projectId === query.projectId : true))
         .filter((f) => (query.pageUrl ? f.pageUrl === query.pageUrl : true))
-        .filter((f) => (query.status ? f.status === query.status : true));
+        .filter((f) => (query.status ? f.status === query.status : true))
+        .filter((f) => (query.dateFrom ? f.createdAt >= `${query.dateFrom}T00:00:00.000Z` : true))
+        .filter((f) => (query.dateTo ? f.createdAt <= `${query.dateTo}T23:59:59.999Z` : true));
 
       const total = filtered.length;
       const limit = query.limit ?? 20;

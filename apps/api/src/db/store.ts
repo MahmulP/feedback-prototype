@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ne, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, lte, ne, sql } from "drizzle-orm";
 import type {
   Feedback,
   FeedbackCoordinates,
@@ -419,6 +419,8 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       const filters = [eq(feedbackTable.projectId, query.projectId)];
       if (query.pageUrl) filters.push(eq(feedbackTable.pageUrl, query.pageUrl));
       if (query.status) filters.push(eq(feedbackTable.status, query.status));
+      if (query.dateFrom) filters.push(gte(feedbackTable.createdAt, new Date(`${query.dateFrom}T00:00:00.000Z`)));
+      if (query.dateTo) filters.push(lte(feedbackTable.createdAt, new Date(`${query.dateTo}T23:59:59.999Z`)));
       // SDK clients pass `excludeArchived: true` so archived pins don't keep
       // rendering on the prototype. An explicit `status` filter wins, so a
       // dashboard can still ask for archived items on demand.
