@@ -426,9 +426,6 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
       // dashboard can still ask for archived items on demand.
       else if (query.excludeArchived) filters.push(ne(feedbackTable.status, "archived"));
 
-      const limit = query.limit ?? 20;
-      const page = query.page ?? 1;
-      const offset = (page - 1) * limit;
       const filterConditions = and(...filters);
 
       const [countResult] = await db
@@ -436,6 +433,19 @@ export function createDbStore(db: DrizzleDb): FeedbackStore {
         .from(feedbackTable)
         .where(filterConditions);
       const total = countResult?.value ?? 0;
+
+      if (query.limit === undefined && query.page === undefined) {
+        const rows = await db
+          .select()
+          .from(feedbackTable)
+          .where(filterConditions)
+          .orderBy(desc(feedbackTable.createdAt));
+        return { items: rows.map(rowToFeedback), total, page: 1, limit: total, totalPages: 1 };
+      }
+
+      const limit = query.limit ?? 20;
+      const page = query.page ?? 1;
+      const offset = (page - 1) * limit;
       const totalPages = Math.ceil(total / limit) || 1;
 
       const rows = await db

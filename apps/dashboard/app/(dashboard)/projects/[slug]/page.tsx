@@ -60,7 +60,7 @@ export default async function ProjectFeedbackPage({ params, searchParams }: Page
           {total > 0 ? `Showing ${startItem}–${endItem} of ${total} feedback items` : "0 feedback items"}
         </p>
         <a
-          href={exportHref(slug, status, pageUrl, dateFrom, dateTo, page, limit)}
+          href={exportHref(slug, status, pageUrl, dateFrom, dateTo)}
           className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-accent"
         >
           <Download className="size-3.5" aria-hidden /> Export Excel
@@ -250,14 +250,12 @@ function filterHref(slug: string, status?: string, pageUrl?: string, page?: numb
   return `/projects/${encodeURIComponent(slug)}${qs ? `?${qs}` : ""}`;
 }
 
-function exportHref(slug: string, status?: string, pageUrl?: string, dateFrom?: string, dateTo?: string, page?: number, limit?: number): string {
+function exportHref(slug: string, status?: string, pageUrl?: string, dateFrom?: string, dateTo?: string): string {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
   if (pageUrl) params.set("pageUrl", pageUrl);
   if (dateFrom) params.set("dateFrom", dateFrom);
   if (dateTo) params.set("dateTo", dateTo);
-  if (page) params.set("page", String(page));
-  if (limit) params.set("limit", String(limit));
   const qs = params.toString();
   return `/projects/${encodeURIComponent(slug)}/export${qs ? `?${qs}` : ""}`;
 }

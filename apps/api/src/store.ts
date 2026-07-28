@@ -414,6 +414,9 @@ export function createInMemoryStore(): FeedbackStore {
         .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
 
       const total = filtered.length;
+      if (query.limit === undefined && query.page === undefined) {
+        return { items: filtered.map(clone), total, limit: total, page: 1, totalPages: 1 };
+      }
       const limit = query.limit ?? 20;
       const page = query.page ?? 1;
       const totalPages = Math.ceil(total / limit) || 1;
