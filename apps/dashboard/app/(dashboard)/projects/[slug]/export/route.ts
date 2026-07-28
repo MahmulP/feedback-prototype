@@ -27,14 +27,28 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
   const { slug } = await ctx.params;
   const statusParam = req.nextUrl.searchParams.get("status") ?? undefined;
   const pageUrl = req.nextUrl.searchParams.get("pageUrl") ?? undefined;
+  const pageParam = req.nextUrl.searchParams.get("page") ?? undefined;
+  const limitParam = req.nextUrl.searchParams.get("limit") ?? undefined;
+  const dateFrom = req.nextUrl.searchParams.get("dateFrom") ?? undefined;
+  const dateTo = req.nextUrl.searchParams.get("dateTo") ?? undefined;
+
   const status = isStatus(statusParam) ? statusParam : undefined;
+  const page = pageParam ? parseInt(pageParam, 10) : undefined;
+  const limit = limitParam ? parseInt(limitParam, 10) : undefined;
 
   let project;
   let items;
   try {
     [project, { items }] = await Promise.all([
       api.getProject(slug),
-      api.listFeedback(slug, { ...(status ? { status } : {}), ...(pageUrl ? { pageUrl } : {}) }),
+      api.listFeedback(slug, {
+        ...(status ? { status } : {}),
+        ...(pageUrl ? { pageUrl } : {}),
+        ...(page ? { page } : {}),
+        ...(limit ? { limit } : {}),
+        ...(dateFrom ? { dateFrom } : {}),
+        ...(dateTo ? { dateTo } : {}),
+      }),
     ]);
   } catch (err) {
     if (err instanceof ApiError) {

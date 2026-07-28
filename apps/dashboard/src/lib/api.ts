@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import type {
   Feedback,
   FeedbackStatus,
+  ListFeedbackResult,
   Project,
   ProjectApiKeyMetadata,
   ProjectApiKeyIssued,
@@ -25,7 +26,7 @@ import { serverEnv } from "./env";
 
 interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
-  query?: Record<string, string | undefined>;
+  query?: Record<string, string | number | undefined>;
   /** When true, do *not* attach the session cookie (useful for the login route). */
   anonymous?: boolean;
 }
@@ -46,7 +47,7 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const url = new URL(path, env.FEEDBACK_API_URL);
   if (opts.query) {
     for (const [k, v] of Object.entries(opts.query)) {
-      if (v !== undefined && v !== "") url.searchParams.set(k, v);
+      if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
     }
   }
   const headers = new Headers(opts.headers);
@@ -227,9 +228,9 @@ export const api = {
     },
     async listFeedback(
       token: string,
-      query: { pageUrl?: string; status?: FeedbackStatus } = {}
-    ): Promise<{ items: Feedback[] }> {
-      return request<{ items: Feedback[] }>("/v1/share/feedback", {
+      query: { pageUrl?: string; status?: FeedbackStatus; limit?: number; page?: number; dateFrom?: string; dateTo?: string } = {}
+    ): Promise<ListFeedbackResult> {
+      return request<ListFeedbackResult>("/v1/share/feedback", {
         anonymous: true,
         headers: { "x-share-token": token },
         query,
@@ -249,8 +250,8 @@ export const api = {
   },
 
   // --- feedback (dashboard reads, scoped to owner)
-  async listFeedback(slug: string, query: { pageUrl?: string; status?: FeedbackStatus } = {}): Promise<{ items: Feedback[] }> {
-    return request<{ items: Feedback[] }>(`/v1/projects/${encodeURIComponent(slug)}/feedback`, { query });
+  async listFeedback(slug: string, query: { pageUrl?: string; status?: FeedbackStatus; limit?: number; page?: number; dateFrom?: string; dateTo?: string } = {}): Promise<ListFeedbackResult> {
+    return request<ListFeedbackResult>(`/v1/projects/${encodeURIComponent(slug)}/feedback`, { query });
   },
   async getFeedback(id: string): Promise<Feedback | null> {
     try {
