@@ -1,6 +1,6 @@
 {
   "name": "@mahmulp/feedback-sdk",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Framework-agnostic visual feedback SDK for prototypes. Pin comments to UI elements, with stable DOM selectors plus screenshot capture. Svelte primary; works in React, Vue, and plain HTML.",
   "license": "MIT",
   "author": {
