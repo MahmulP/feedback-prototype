@@ -319,10 +319,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     const parsed = listQuerySchema.safeParse({
       pageUrl: c.req.query("pageUrl") ?? undefined,
       status: c.req.query("status") ?? undefined,
+      limit: c.req.query("limit") ?? undefined,
+      page: c.req.query("page") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
-    const items = await deps.store.list({ projectId: slug, ...parsed.data });
-    return c.json({ items });
+    const result = await deps.store.list({ projectId: slug, ...parsed.data });
+    return c.json(result);
   });
 
   app.get("/v1/share/feedback/:id", requireShareAccess, async (c) => {
@@ -383,10 +385,12 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     const parsed = listQuerySchema.safeParse({
       pageUrl: c.req.query("pageUrl") ?? undefined,
       status: c.req.query("status") ?? undefined,
+      limit: c.req.query("limit") ?? undefined,
+      page: c.req.query("page") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
-    const items = await deps.store.list({ projectId: access.project.slug, ...parsed.data });
-    return c.json({ items });
+    const result = await deps.store.list({ projectId: access.project.slug, ...parsed.data });
+    return c.json(result);
   });
 
   app.get("/v1/feedback/:id", requireUser, async (c) => {
@@ -488,14 +492,16 @@ export function createApp(deps: AppDeps): Hono<{ Variables: AppVariables }> {
     const parsed = listQuerySchema.safeParse({
       pageUrl: c.req.query("pageUrl") ?? undefined,
       status: c.req.query("status") ?? undefined,
+      limit: c.req.query("limit") ?? undefined,
+      page: c.req.query("page") ?? undefined,
     });
     if (!parsed.success) return validation(c, parsed.error.message);
-    const items = await deps.store.list({
+    const result = await deps.store.list({
       projectId: bag.scopedProjectId!,
       excludeArchived: true,
       ...parsed.data,
     });
-    return c.json({ items });
+    return c.json(result);
   });
 
   app.patch("/v1/feedback/:id/coordinates", requireProjectKey, ingestRateLimit, async (c) => {

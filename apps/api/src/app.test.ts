@@ -633,4 +633,31 @@ describe("email notifications", () => {
     expect(captured).toHaveLength(2);
     expect(captured[1]).toEqual({ kind: "reply", feedbackId: fb.id });
   });
+
+  it("supports pagination when listing feedback", async () => {
+    const alice = await signup("pager@example.com");
+    await createProject(alice, "pages");
+    const key = await issueKey(alice, "pages");
+
+    for (let i = 0; i < 5; i++) {
+      await postJson(
+        "/v1/feedback",
+        { ...baseFeedback, pageUrl: "/home" },
+        { headers: { "x-feedback-key": key } }
+      );
+    }
+
+    const list = await app.fetch(
+      new Request("http://test.local/v1/projects/pages/feedback?limit=2&page=2", {
+        headers: { cookie: alice.cookie },
+      })
+    );
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as { items: any[]; total: number; limit: number; page: number; totalPages: number };
+    expect(body.items).toHaveLength(2);
+    expect(body.total).toBe(5);
+    expect(body.limit).toBe(2);
+    expect(body.page).toBe(2);
+    expect(body.totalPages).toBe(3);
+  });
 });

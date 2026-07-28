@@ -47,9 +47,23 @@ export function createMockTransport(options: MockTransportOptions = {}): Feedbac
       const filtered = items
         .filter((f) => (query.projectId ? f.projectId === query.projectId : true))
         .filter((f) => (query.pageUrl ? f.pageUrl === query.pageUrl : true))
-        .filter((f) => (query.status ? f.status === query.status : true))
-        .map(clone);
-      return { items: filtered };
+        .filter((f) => (query.status ? f.status === query.status : true));
+
+      const total = filtered.length;
+      const limit = query.limit ?? 20;
+      const page = query.page ?? 1;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const offset = (page - 1) * limit;
+
+      const paginated = filtered.slice(offset, offset + limit);
+
+      return {
+        items: paginated.map(clone),
+        total,
+        limit,
+        page,
+        totalPages,
+      };
     },
 
     async create(input: CreateFeedbackInput): Promise<Feedback> {

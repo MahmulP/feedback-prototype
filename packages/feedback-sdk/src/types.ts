@@ -74,10 +74,16 @@ export interface ListFeedbackQuery {
   projectId: string;
   pageUrl?: string;
   status?: FeedbackStatus;
+  limit?: number;
+  page?: number;
 }
 
 export interface ListFeedbackResult {
   items: Feedback[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 /**

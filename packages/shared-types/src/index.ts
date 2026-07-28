@@ -89,10 +89,16 @@ export interface ListFeedbackQuery {
    * this false so reviewers can manage archived items.
    */
   excludeArchived?: boolean;
+  limit?: number;
+  page?: number;
 }
 
 export interface ListFeedbackResult {
   items: Feedback[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 /**

@@ -36,6 +36,8 @@ export const createFeedbackSchema = z.object({
 export const listQuerySchema = z.object({
   pageUrl: z.string().max(2000).optional(),
   status: z.enum(["open", "resolved", "archived"]).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  page: z.coerce.number().int().min(1).optional(),
 });
 
 export const statusUpdateSchema = z.object({

@@ -53,3 +53,6 @@ apps/api/data/
 
 # kiro local workspace
 .kiro/
+.graphify-out/
+
+graphify-out/

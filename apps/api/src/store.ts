@@ -6,6 +6,7 @@ import type {
   FeedbackCoordinates,
   FeedbackStatus,
   ListFeedbackQuery,
+  ListFeedbackResult,
   Project,
   ProjectApiKeyMetadata,
   ProjectMember,
@@ -72,7 +73,7 @@ export interface FeedbackStore {
   resolveProjectByKeyHash(keyHash: string): Promise<Project | null>;
 
   // --- feedback (scoped per project)
-  list(query: ListFeedbackQuery): Promise<Feedback[]>;
+  list(query: ListFeedbackQuery): Promise<ListFeedbackResult>;
   get(id: string): Promise<Feedback | null>;
   create(input: CreateFeedbackInput): Promise<Feedback>;
   reply(id: string, comment: { author: FeedbackAuthor; body: string }): Promise<Feedback | null>;
@@ -409,7 +410,22 @@ export function createInMemoryStore(): FeedbackStore {
           query.excludeArchived && !query.status ? f.status !== "archived" : true
         )
         .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
-      return filtered.map(clone);
+
+      const total = filtered.length;
+      const limit = query.limit ?? 20;
+      const page = query.page ?? 1;
+      const totalPages = Math.ceil(total / limit) || 1;
+      const offset = (page - 1) * limit;
+
+      const paginated = filtered.slice(offset, offset + limit);
+
+      return {
+        items: paginated.map(clone),
+        total,
+        limit,
+        page,
+        totalPages,
+      };
     },
 
     async get(id) {
